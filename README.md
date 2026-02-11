@@ -17,3 +17,16 @@ flowchart TD
     E -->|Success| F
     F -->|Sign Out| G --> E
 ```
+
+### Todo
+
+- [ ] Work on Models
+  - [ ] AI, TTS, Video
+
+### In Progress
+
+- [ ] Work on the buttons
+
+### Done ✓
+
+- [x] Google Sign-in
