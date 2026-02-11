@@ -2,11 +2,18 @@
 flowchart TD
     A[Launch App]
     B{Is First Launch?}
-    C[Login]
-    D[Onboarding page]
-    E[main page]
+    C{Already Signed In?}
+    D[Onboarding Pages]
+    E[Google Sign-In / Login]
+    F["Main Page (Chat / History / Settings)"]
+    G[Sign Out]
 
     A --> B
-    B -->|Yes| D --> C --> E
-    B -->|No| C --> E
+    B -->|Yes| D
+    B -->|No| C
+    D --> C
+    C -->|Yes| F
+    C -->|No| E
+    E -->|Success| F
+    F -->|Sign Out| G --> E
 ```
