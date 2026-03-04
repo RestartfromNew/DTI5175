@@ -9,6 +9,8 @@ data class Profile (
     val personality: String = "",
     val voiceId: String? = null,
     val facetimeUrl: String? = null,
+
+    val customAvatarPath: String? = null,
     val speakStyle: List<String> = emptyList(),
     val doRules: List<String> = emptyList(),
     val dontRules: List<String> = emptyList(),
