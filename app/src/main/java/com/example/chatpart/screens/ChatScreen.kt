@@ -1,0 +1,838 @@
+package com.example.chatpart.screens
+
+import android.Manifest
+import android.content.Context
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.KeyboardVoice
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.example.chatpart.DarkText
+import com.example.chatpart.Lavender
+import com.example.chatpart.Peach
+import com.example.chatpart.SoftWhite
+import com.example.chatpart.api.MockVoiceApiService
+import com.example.chatpart.api.VoiceApiService
+import com.example.chatpart.voice.AudioRecordManager
+import com.google.firebase.auth.FirebaseUser
+import com.example.chatpart.data.PersonChat
+import com.example.chatpart.data.ChatHistoryManager
+import com.example.chatpart.data.ChatMessageData
+import com.example.chatpart.domain.Profile
+import com.example.chatpart.domain.Message
+import com.example.chatpart.domain.Role
+import kotlinx.coroutines.launch
+
+// ─── Data Models ────────────────────────────────────────────────────────────
+
+data class ChatbotAvatar(
+    val id: String,
+    val name: String,
+    val emoji: String,
+    val color: Color,
+    val greeting: String
+)
+
+data class ChatMessage(
+    val text: String,
+    val isFromUser: Boolean,
+    val isVoice: Boolean = false,
+    val voiceDurationSec: Int = 0
+)
+
+val defaultChatbots = listOf(
+    ChatbotAvatar("assistant", "AI 助手", "🤖", Color(0xFF7C5CFC), "Hi! I'm your AI assistant. How can I help? ✨"),
+    ChatbotAvatar("teacher", "老师", "👩‍🏫", Color(0xFF4CAF50), "Hello! I'm your teacher. Ask me anything! 📚"),
+    ChatbotAvatar("coding", "程序员", "💻", Color(0xFF2196F3), "Hey! Need help with code? Let's build something! 🚀"),
+    ChatbotAvatar("artist", "艺术家", "🎨", Color(0xFFFF9800), "Hi! Let's explore creativity together! 🌈"),
+    ChatbotAvatar("doctor", "医生", "🩺", Color(0xFFE91E63), "Hello! I can help with health questions. 🏥"),
+    ChatbotAvatar("chef", "厨师", "👨‍🍳", Color(0xFFFF5722), "Hey! Let's cook something delicious! 🍳"),
+)
+
+// ─── Main ChatScreen ────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatScreen(
+    currentUser: FirebaseUser? = null,
+    personChat: PersonChat? = null,
+    currentProfile: Profile? = null,
+    isDarkMode: Boolean = false
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Theme-aware colors
+    val backgroundColor = if (isDarkMode) {
+        androidx.compose.material3.MaterialTheme.colorScheme.background
+    } else {
+        com.example.chatpart.SoftWhite
+    }
+    val gradientEnd = if (isDarkMode) {
+        androidx.compose.material3.MaterialTheme.colorScheme.surface
+    } else {
+        Color(0xFFF3F0FF)
+    }
+
+    // Chatbot selection
+    var selectedBot by remember { mutableStateOf(defaultChatbots[0]) }
+    var showAvatarPicker by remember { mutableStateOf(false) }
+
+    // Chat history manager for persistence
+    val chatHistoryManager = remember { ChatHistoryManager(context) }
+
+    // Load saved messages or use default greeting
+    var messages by remember {
+        mutableStateOf(run {
+            val saved = chatHistoryManager.loadMessages()
+            if (saved.isNotEmpty()) {
+                saved.map {
+                    ChatMessage(
+                        text = it.text,
+                        isFromUser = it.isFromUser,
+                        isVoice = it.isVoice,
+                        voiceDurationSec = it.voiceDurationSec
+                    )
+                }
+            } else {
+                listOf(ChatMessage(defaultChatbots[0].greeting, isFromUser = false))
+            }
+        })
+    }
+
+    // Save messages whenever they change
+    LaunchedEffect(messages) {
+        val dataMessages = messages.map {
+            ChatMessageData(
+                text = it.text,
+                isFromUser = it.isFromUser,
+                isVoice = it.isVoice,
+                voiceDurationSec = it.voiceDurationSec
+            )
+        }
+        chatHistoryManager.saveMessages(dataMessages)
+    }
+
+    val listState = rememberLazyListState()
+
+    // Input mode
+    var inputText by remember { mutableStateOf("") }
+    var isVoiceMode by remember { mutableStateOf(false) }
+    var isRecording by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+
+    // Speech to text state
+    var isSpeechToTextMode by remember { mutableStateOf(false) }
+
+    // Chat history for AI
+    var chatHistory by remember { mutableStateOf(listOf<Message>()) }
+
+    // Voice recording
+    val audioManager = remember { AudioRecordManager(context) }
+    val voiceApi: VoiceApiService = remember { MockVoiceApiService() }
+
+    // Vibrator for haptic feedback
+    val vibrator = remember {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vibratorManager.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+    }
+
+    // Function to trigger haptic feedback
+    fun triggerHapticFeedback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(50)
+        }
+    }
+
+    // Permission
+    var hasAudioPermission by remember { mutableStateOf(audioManager.hasPermission()) }
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted
+    }
+
+    // Auto-scroll to bottom on new messages
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(backgroundColor, gradientEnd)))
+    ) {
+        // ── Top App Bar with chatbot info ──
+        TopAppBar(
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { showAvatarPicker = !showAvatarPicker }
+                ) {
+                    // Chatbot avatar
+                    Surface(
+                        shape = CircleShape,
+                        color = selectedBot.color.copy(alpha = 0.15f),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text(selectedBot.emoji, fontSize = 22.sp)
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            selectedBot.name,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = DarkText
+                        )
+                        Text(
+                            "Online · Tap to change",
+                            fontSize = 12.sp,
+                            color = Color(0xFF4CAF50)
+                        )
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent)
+        )
+
+        // ── Avatar Picker ──
+        AnimatedVisibility(visible = showAvatarPicker, enter = fadeIn(), exit = fadeOut()) {
+            AvatarPickerBar(
+                chatbots = defaultChatbots,
+                selectedBot = selectedBot,
+                onSelect = { bot ->
+                    selectedBot = bot
+                    showAvatarPicker = false
+                    // Reset chat with new bot greeting
+                    messages = listOf(ChatMessage(bot.greeting, isFromUser = false))
+                }
+            )
+        }
+
+        // ── Messages List ──
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(vertical = 8.dp)
+        ) {
+            items(messages) { message ->
+                ChatBubble(
+                    message = message,
+                    currentUser = currentUser,
+                    botAvatar = selectedBot,
+                    isDarkMode = isDarkMode
+                )
+            }
+        }
+
+        // ── Input Bar ──
+        val inputBarColor = if (isDarkMode) Color(0xFF2D2D2D) else Color.White
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = inputBarColor,
+            shadowElevation = 8.dp,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Voice/Keyboard toggle button
+                    Surface(
+                        onClick = {
+                            isVoiceMode = !isVoiceMode
+                            if (isVoiceMode && !hasAudioPermission) {
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        },
+                        shape = CircleShape,
+                        color = if (isVoiceMode) Peach else Lavender,
+                        modifier = Modifier.size(44.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text(
+                                if (isVoiceMode) "⌨️" else "🎤",
+                                fontSize = 20.sp
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    if (isVoiceMode) {
+                        // ── WeChat-style hold-to-record button ──
+                        VoiceRecordButton(
+                            isRecording = isRecording,
+                            modifier = Modifier.weight(1f),
+                            onStartRecording = {
+                                triggerHapticFeedback()
+                                if (hasAudioPermission) {
+                                    val started = audioManager.startRecording()
+                                    isRecording = started
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                            },
+                            onStopRecording = {
+                                triggerHapticFeedback()
+                                isRecording = false
+                                val audioFile = audioManager.stopRecording()
+                                if (audioFile != null && audioFile.exists()) {
+                                    // Add voice message to chat
+                                    messages = messages + ChatMessage(
+                                        text = "🎤 Voice message",
+                                        isFromUser = true,
+                                        isVoice = true,
+                                        voiceDurationSec = (audioFile.length() / (16000 * 2)).toInt().coerceAtLeast(1)
+                                    )
+
+                                    // Send to voice API
+                                    scope.launch {
+                                        val result = voiceApi.sendVoiceMessage(audioFile, selectedBot.id)
+                                        result.onSuccess { response ->
+                                            messages = messages + ChatMessage(
+                                                text = response.text,
+                                                isFromUser = false
+                                            )
+                                        }
+                                        result.onFailure {
+                                            messages = messages + ChatMessage(
+                                                text = "Sorry, I couldn't process your voice message.",
+                                                isFromUser = false
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    } else {
+                        // Theme-aware colors for text field
+                        val textFieldBgColor = if (isDarkMode) Color(0xFF3D3D3D) else Color(0xFFF8F6FF)
+                        val textFieldTextColor = if (isDarkMode) Color.White else Color(0xFF2D2D2D)
+                        val textFieldPlaceholderColor = if (isDarkMode) Color(0xFFAAAAAA) else Color.Gray
+                        val textFieldBorderColor = if (isDarkMode) Color(0xFF555555) else Color.LightGray.copy(alpha = 0.5f)
+
+                        // ── Text input ──
+                        OutlinedTextField(
+                            value = inputText,
+                            onValueChange = { inputText = it },
+                            placeholder = { Text("Type a message...", color = textFieldPlaceholderColor) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(24.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Lavender,
+                                unfocusedBorderColor = textFieldBorderColor,
+                                focusedContainerColor = textFieldBgColor,
+                                unfocusedContainerColor = textFieldBgColor,
+                                focusedTextColor = textFieldTextColor,
+                                unfocusedTextColor = textFieldTextColor,
+                                cursorColor = Lavender
+                            ),
+                            maxLines = 3
+                        )
+
+                        Spacer(Modifier.width(4.dp))
+
+                        // Speech to Text button
+                        Surface(
+                            onClick = {
+                                triggerHapticFeedback()
+                                if (!hasAudioPermission) {
+                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                } else {
+                                    if (!isSpeechToTextMode) {
+                                        // Start speech recognition
+                                        isSpeechToTextMode = true
+                                        val started = audioManager.startRecording()
+                                        if (started) {
+                                            isRecording = true
+                                        }
+                                    } else {
+                                        // Stop speech recognition
+                                        isSpeechToTextMode = false
+                                        isRecording = false
+                                        val audioFile = audioManager.stopRecording()
+                                        if (audioFile != null && audioFile.exists()) {
+                                            // Use mock transcription for now
+                                            scope.launch {
+                                                val result = voiceApi.transcribeAudio(audioFile)
+                                                result.onSuccess { text ->
+                                                    inputText = inputText + text
+                                                }
+                                                result.onFailure {
+                                                    // Show error but don't replace text
+                                                    Log.e("ChatScreen", "Speech to text failed")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            shape = CircleShape,
+                            color = if (isSpeechToTextMode) Peach else Lavender.copy(alpha = 0.5f),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    Icons.Filled.Mic,
+                                    contentDescription = "Speech to text",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.width(4.dp))
+
+                    // Send button (only in text mode)
+                    if (!isVoiceMode) {
+                        FilledIconButton(
+                            onClick = {
+                                if (inputText.isNotBlank() && !isLoading) {
+                                    val userMsg = inputText.trim()
+                                    messages = messages + ChatMessage(userMsg, isFromUser = true)
+                                    inputText = ""
+                                    isLoading = true
+
+                                    // Update chat history
+                                    chatHistory = chatHistory + Message(Role.USER, userMsg)
+
+                                    // Use real AI if personChat and profile are available
+                                    if (personChat != null && currentProfile != null) {
+                                        scope.launch {
+                                            try {
+                                                val result = personChat.sendMessage(
+                                                    p = currentProfile,
+                                                    history = chatHistory,
+                                                    userText = userMsg
+                                                )
+                                                messages = messages + ChatMessage(
+                                                    result.replyText,
+                                                    isFromUser = false
+                                                )
+                                                // Update chat history with AI response
+                                                chatHistory = chatHistory + Message(Role.ASSISTANT, result.replyText)
+                                                Log.d("ChatScreen", "AI Response: ${result.replyText}")
+                                            } catch (e: Exception) {
+                                                Log.e("ChatScreen", "AI Error: ${e.message}")
+                                                messages = messages + ChatMessage(
+                                                    "Sorry, I encountered an error. Please try again.",
+                                                    isFromUser = false
+                                                )
+                                            }
+                                            isLoading = false
+                                        }
+                                    } else {
+                                        // Fallback to mock response if AI not available
+                                        messages = messages + ChatMessage(
+                                            "Thanks for your message! I received: \"$userMsg\"",
+                                            isFromUser = false
+                                        )
+                                        isLoading = false
+                                    }
+                                }
+                            },
+                            shape = CircleShape,
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = if (isLoading) Color.Gray else Peach
+                            ),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            if (isLoading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Rounded.Send,
+                                    contentDescription = "Send",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Avatar Picker Bar ──────────────────────────────────────────────────────
+
+@Composable
+fun AvatarPickerBar(
+    chatbots: List<ChatbotAvatar>,
+    selectedBot: ChatbotAvatar,
+    onSelect: (ChatbotAvatar) -> Unit
+) {
+    Surface(
+        color = Color.White,
+        shadowElevation = 4.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(vertical = 12.dp)) {
+            Text(
+                "Choose your chatbot",
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.Gray,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(chatbots) { bot ->
+                    val isSelected = bot.id == selectedBot.id
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) bot.color.copy(alpha = 0.12f) else Color(0xFFF5F5F5),
+                        border = if (isSelected) {
+                            androidx.compose.foundation.BorderStroke(2.dp, bot.color)
+                        } else null,
+                        modifier = Modifier
+                            .clickable { onSelect(bot) }
+                            .width(80.dp)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
+                        ) {
+                            Text(bot.emoji, fontSize = 28.sp)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                bot.name,
+                                fontSize = 12.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                color = if (isSelected) bot.color else DarkText,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── WeChat-style Voice Record Button ───────────────────────────────────────
+
+@Composable
+fun VoiceRecordButton(
+    isRecording: Boolean,
+    modifier: Modifier = Modifier,
+    onStartRecording: () -> Unit,
+    onStopRecording: () -> Unit
+) {
+    val bgColor by animateColorAsState(
+        if (isRecording) Color(0xFFFF4444).copy(alpha = 0.1f) else Color(0xFFF0F0F0),
+        label = "recordBg"
+    )
+    val textColor by animateColorAsState(
+        if (isRecording) Color(0xFFFF4444) else Color.Gray,
+        label = "recordText"
+    )
+
+    // Pulsing animation when recording
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = if (isRecording) 1.03f else 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = bgColor,
+        modifier = modifier
+            .height(48.dp)
+            .scale(pulseScale)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        onStartRecording()
+                        // Wait for release
+                        val released = tryAwaitRelease()
+                        if (released) {
+                            onStopRecording()
+                        } else {
+                            onStopRecording()
+                        }
+                    }
+                )
+            }
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isRecording) {
+                    // Recording indicator dots
+                    RecordingIndicator()
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text(
+                    if (isRecording) "Release to send" else "Hold to talk",
+                    fontWeight = FontWeight.Medium,
+                    fontSize = 15.sp,
+                    color = textColor
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun RecordingIndicator() {
+    val infiniteTransition = rememberInfiniteTransition(label = "dots")
+
+    Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        repeat(3) { index ->
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(400, delayMillis = index * 150),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "dot$index"
+            )
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFF4444).copy(alpha = alpha))
+            )
+        }
+    }
+}
+
+// ─── Chat Bubble ────────────────────────────────────────────────────────────
+
+@Composable
+fun ChatBubble(
+    message: ChatMessage,
+    currentUser: FirebaseUser? = null,
+    botAvatar: ChatbotAvatar = defaultChatbots[0],
+    isDarkMode: Boolean = false
+) {
+    val isUser = message.isFromUser
+    val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
+
+    // Theme-aware colors
+    val userBubbleColor = Brush.horizontalGradient(listOf(Peach, Peach.copy(alpha = 0.8f)))
+    val botBubbleColorLight = Brush.horizontalGradient(listOf(Color.White, Color(0xFFF8F6FF)))
+    val botBubbleColorDark = Brush.horizontalGradient(listOf(Color(0xFF2D2D2D), Color(0xFF3D3D3D)))
+
+    val bubbleColor = if (isUser) {
+        userBubbleColor
+    } else {
+        if (isDarkMode) botBubbleColorDark else botBubbleColorLight
+    }
+
+    val textColor = if (isUser) Color.White else if (isDarkMode) Color(0xFFE0E0E0) else Color(0xFF2D2D2D)
+    val bubbleShape = if (isUser) {
+        RoundedCornerShape(20.dp, 20.dp, 4.dp, 20.dp)
+    } else {
+        RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
+    }
+
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = alignment
+    ) {
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+        ) {
+            // Bot avatar (left side)
+            if (!isUser) {
+                Surface(
+                    shape = CircleShape,
+                    color = botAvatar.color.copy(alpha = 0.15f),
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                        Text(botAvatar.emoji, fontSize = 14.sp)
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+            }
+
+            // Message bubble
+            Surface(
+                shape = bubbleShape,
+                shadowElevation = 2.dp,
+                modifier = Modifier.widthIn(max = 260.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .background(bubbleColor)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    if (message.isVoice) {
+                        // Voice message display
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Filled.Mic,
+                                contentDescription = null,
+                                tint = textColor.copy(alpha = 0.8f),
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            // Waveform bars
+                            VoiceWaveform(
+                                color = textColor.copy(alpha = 0.6f),
+                                modifier = Modifier
+                                    .width((message.voiceDurationSec * 30).coerceIn(40, 120).dp)
+                                    .height(20.dp)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "${message.voiceDurationSec}\"",
+                                color = textColor.copy(alpha = 0.7f),
+                                fontSize = 13.sp
+                            )
+                        }
+                    } else {
+                        Text(
+                            text = message.text,
+                            color = textColor,
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp
+                        )
+                    }
+                }
+            }
+
+            // User avatar (right side)
+            if (isUser) {
+                Spacer(Modifier.width(8.dp))
+                if (currentUser?.photoUrl != null) {
+                    AsyncImage(
+                        model = currentUser.photoUrl.toString(),
+                        contentDescription = "Your avatar",
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Surface(
+                        shape = CircleShape,
+                        color = Peach.copy(alpha = 0.2f),
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                            Text(
+                                currentUser?.displayName?.firstOrNull()?.uppercase() ?: "U",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Peach
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Voice Waveform Visual ──────────────────────────────────────────────────
+
+@Composable
+fun VoiceWaveform(color: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val barCount = 12
+        val barWidth = size.width / (barCount * 2f)
+        val maxHeight = size.height
+
+        for (i in 0 until barCount) {
+            // Create a wave pattern
+            val height = maxHeight * when {
+                i < 2 || i > barCount - 3 -> 0.3f
+                i % 3 == 0 -> 0.8f
+                i % 2 == 0 -> 0.5f
+                else -> 0.65f
+            }
+            val x = (i * 2 + 1) * barWidth
+            drawLine(
+                color = color,
+                start = Offset(x, (maxHeight - height) / 2),
+                end = Offset(x, (maxHeight + height) / 2),
+                strokeWidth = barWidth * 0.8f
+            )
+        }
+    }
+}
