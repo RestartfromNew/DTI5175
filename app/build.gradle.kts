@@ -80,6 +80,9 @@ dependencies {
     // Image Loading
     implementation(libs.coil.compose)
 
+    // Reorderable (drag and drop)
+    implementation(libs.reorderable)
+
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -41,6 +41,12 @@ import com.example.chatpart.screens.LoginScreen
 import com.example.chatpart.screens.SettingsScreen
 import com.example.chatpart.screens.CharacterListScreen
 import com.example.chatpart.screens.CharacterEditorScreen
+import com.example.chatpart.screens.GenderSelectionScreen
+import com.example.chatpart.screens.AvatarSelectionScreen
+import com.example.chatpart.screens.CharacterBasicScreen
+import com.example.chatpart.screens.CharacterDetailScreen
+import com.example.chatpart.screens.LanguageSelectionScreen
+import com.example.chatpart.screens.VoiceCloneScreen
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.ui.theme.ChatPartTheme
 import com.example.chatpart.ui.theme.Peach
@@ -58,6 +64,7 @@ import com.example.chatpart.data.PersonChat
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
+import java.util.UUID
 
 data class TabItem(
     val title: String,
@@ -96,6 +103,13 @@ class MainActivity : ComponentActivity() {
         const val PAGE_MAIN = 3
         const val PAGE_CHARACTER_LIST = 4
         const val PAGE_CHARACTER_EDITOR = 5
+        // New onboarding flow pages
+        const val PAGE_GENDER_SELECT = 6
+        const val PAGE_AVATAR_SELECT = 7
+        const val PAGE_CHARACTER_BASIC = 8
+        const val PAGE_CHARACTER_DETAIL = 9
+        const val PAGE_LANGUAGE_SELECT = 10
+        const val PAGE_VOICE_CLONE = 11
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -130,6 +144,13 @@ class MainActivity : ComponentActivity() {
             // Track auth state
             var currentUser by remember { mutableStateOf(authManager.currentUser) }
 
+            // Onboarding flow state
+            var onboardingGender by remember { mutableStateOf<String?>(null) }
+            var onboardingAvatar by remember { mutableStateOf<String?>(null) }
+            var onboardingName by remember { mutableStateOf("") }
+            var onboardingRelationship by remember { mutableStateOf("") }
+            var pendingVoiceCloneProfile by remember { mutableStateOf<Profile?>(null) }
+
             // Apply theme based on dark mode
             ChatPartTheme(darkTheme = isDarkMode) {
                 when (currentPage) {
@@ -146,39 +167,34 @@ class MainActivity : ComponentActivity() {
                     PAGE_ONBOARDING_2 -> {
                         CloudOnboardingScreen(
                             onSkip = {
-                                // 首次使用: Onboarding → 创建角色 → 主界面 (跳过登录)
-                                if (characters.isEmpty()) {
-                                    editingCharacter = null
-                                    currentPage = PAGE_CHARACTER_EDITOR
+                                // 新引导流程: Onboarding → 语言选择 → 性别选择 → 头像选择 → 基本资料 → 详细资料 → 主界面
+                                if (authManager.isSignedIn) {
+                                    // 已登录用户直接进入语言选择
+                                    currentPage = PAGE_LANGUAGE_SELECT
                                 } else {
-                                    currentPage = PAGE_MAIN
+                                    // 未登录用户先登录
+                                    currentPage = PAGE_LOGIN
                                 }
                             },
                             onNext = {
-                                // 首次使用: Onboarding → 创建角色 → 主界面 (跳过登录)
-                                if (characters.isEmpty()) {
-                                    editingCharacter = null
-                                    currentPage = PAGE_CHARACTER_EDITOR
+                                // 新引导流程: Onboarding → 语言选择 → 性别选择 → 头像选择 → 基本资料 → 详细资料 → 主界面
+                                if (authManager.isSignedIn) {
+                                    currentPage = PAGE_LANGUAGE_SELECT
                                 } else {
-                                    currentPage = PAGE_MAIN
+                                    currentPage = PAGE_LOGIN
                                 }
                             }
                         )
                     }
                     PAGE_LOGIN -> {
-                        // Login screen (保留用于后续登录功能，暂时不会被首次使用触发)
+                        // 首次使用登录后跳转新引导流程
                         LoginScreen(
                             authManager = authManager,
                             onSignInSuccess = {
                                 currentUser = authManager.currentUser
                                 Log.d("Firebase", "✅ User signed in: ${currentUser?.displayName}")
-                                // 登录后检查是否有角色，没有则引导创建
-                                if (characters.isEmpty()) {
-                                    editingCharacter = null
-                                    currentPage = PAGE_CHARACTER_EDITOR
-                                } else {
-                                    currentPage = PAGE_MAIN
-                                }
+                                // 登录后跳转到语言选择
+                                currentPage = PAGE_LANGUAGE_SELECT
                             }
                         )
                     }
@@ -235,6 +251,126 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    // New onboarding flow pages
+                    PAGE_LANGUAGE_SELECT -> {
+                        LanguageSelectionScreen(
+                            isDarkMode = isDarkMode,
+                            onLanguageSelected = { langCode ->
+                                currentPage = PAGE_GENDER_SELECT
+                            },
+                            onSkip = {
+                                currentPage = PAGE_GENDER_SELECT
+                            }
+                        )
+                    }
+                    PAGE_GENDER_SELECT -> {
+                        GenderSelectionScreen(
+                            isDarkMode = isDarkMode,
+                            onGenderSelected = { gender ->
+                                onboardingGender = gender
+                                currentPage = PAGE_AVATAR_SELECT
+                            },
+                            onSkip = {
+                                // Skip to main (for editing existing character)
+                                currentPage = if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN
+                            }
+                        )
+                    }
+                    PAGE_AVATAR_SELECT -> {
+                        AvatarSelectionScreen(
+                            isDarkMode = isDarkMode,
+                            selectedGender = onboardingGender ?: "其他",
+                            onAvatarSelected = { avatar ->
+                                onboardingAvatar = avatar
+                                currentPage = PAGE_CHARACTER_BASIC
+                            },
+                            onBack = {
+                                currentPage = PAGE_GENDER_SELECT
+                            },
+                            onSkip = {
+                                // Skip to main
+                                currentPage = if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN
+                            }
+                        )
+                    }
+                    PAGE_CHARACTER_BASIC -> {
+                        CharacterBasicScreen(
+                            isDarkMode = isDarkMode,
+                            selectedGender = onboardingGender ?: "其他",
+                            selectedAvatar = onboardingAvatar ?: "👤",
+                            onNext = { name, relationship ->
+                                onboardingName = name
+                                onboardingRelationship = relationship
+                                currentPage = PAGE_CHARACTER_DETAIL
+                            },
+                            onBack = {
+                                currentPage = PAGE_AVATAR_SELECT
+                            },
+                            onSkip = {
+                                // 如果没有填写信息就跳过，返回角色列表
+                                currentPage = PAGE_CHARACTER_LIST
+                            }
+                        )
+                    }
+                    PAGE_CHARACTER_DETAIL -> {
+                        val basicProfile = Profile(
+                            id = "char_${UUID.randomUUID()}",
+                            name = onboardingName,
+                            gender = onboardingGender ?: "其他",
+                            relationship = onboardingRelationship,
+                            background = "",
+                            personality = "",
+                            customAvatarPath = onboardingAvatar
+                        )
+                        CharacterDetailScreen(
+                            isDarkMode = isDarkMode,
+                            basicProfile = basicProfile,
+                            onSave = { profile ->
+                                // Go to voice clone screen
+                                pendingVoiceCloneProfile = profile
+                                currentPage = PAGE_VOICE_CLONE
+                            },
+                            onBack = {
+                                currentPage = PAGE_CHARACTER_BASIC
+                            },
+                            onSkip = {
+                                // Go to voice clone screen without additional details
+                                pendingVoiceCloneProfile = basicProfile
+                                currentPage = PAGE_VOICE_CLONE
+                            }
+                        )
+                    }
+                    PAGE_VOICE_CLONE -> {
+                        VoiceCloneScreen(
+                            isDarkMode = isDarkMode,
+                            characterName = pendingVoiceCloneProfile?.name ?: "Character",
+                            onVoiceCloned = { voiceId ->
+                                // Update profile with voice ID and save
+                                val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
+                                if (profile != null) {
+                                    characterStorage.addCharacter(profile)
+                                    characters = characterStorage.loadCharacters()
+                                    characterStorage.saveSelectedCharacterId(profile.id)
+                                    selectedCharacter = profile
+                                }
+                                currentPage = PAGE_MAIN
+                            },
+                            onSkip = {
+                                // Save profile without voice cloning
+                                val profile = pendingVoiceCloneProfile
+                                if (profile != null) {
+                                    characterStorage.addCharacter(profile)
+                                    characters = characterStorage.loadCharacters()
+                                    characterStorage.saveSelectedCharacterId(profile.id)
+                                    selectedCharacter = profile
+                                }
+                                currentPage = PAGE_MAIN
+                            },
+                            onBack = {
+                                currentPage = PAGE_CHARACTER_DETAIL
+                            }
+                        )
+                    }
                     else -> {
                         // Main page with tab navigation
                         MainTabScreen(
@@ -242,6 +378,7 @@ class MainActivity : ComponentActivity() {
                             personChat = personChat,
                             currentProfile = selectedCharacter,
                             isDarkMode = isDarkMode,
+                            customCharacters = characters,
                             onDarkModeChange = { isDarkMode = it },
                             onNavigateToCharacters = {
                                 currentPage = PAGE_CHARACTER_LIST
@@ -265,6 +402,7 @@ fun MainTabScreen(
     personChat: PersonChat? = null,
     currentProfile: Profile? = null,
     isDarkMode: Boolean = false,
+    customCharacters: List<Profile> = emptyList(),
     onDarkModeChange: (Boolean) -> Unit = {},
     onNavigateToCharacters: () -> Unit = {},
     onSignOut: () -> Unit = {}
@@ -321,7 +459,8 @@ fun MainTabScreen(
                     currentUser = currentUser,
                     personChat = personChat,
                     currentProfile = currentProfile,
-                    isDarkMode = isDarkMode
+                    isDarkMode = isDarkMode,
+                    customCharacters = customCharacters
                 )
                 1 -> HistoryScreen(isDarkMode = isDarkMode)
                 2 -> SettingsScreen(

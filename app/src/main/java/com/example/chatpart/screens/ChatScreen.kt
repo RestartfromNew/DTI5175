@@ -2,6 +2,7 @@ package com.example.chatpart.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -49,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.chatpart.DarkText
 import com.example.chatpart.Lavender
 import com.example.chatpart.Peach
@@ -61,6 +63,7 @@ import com.example.chatpart.data.PersonChat
 import com.example.chatpart.data.ChatHistoryManager
 import com.example.chatpart.data.ChatMessageData
 import com.example.chatpart.domain.Profile
+import com.example.chatpart.i18n.LocalizedString
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
 import kotlinx.coroutines.launch
@@ -72,7 +75,9 @@ data class ChatbotAvatar(
     val name: String,
     val emoji: String,
     val color: Color,
-    val greeting: String
+    val greeting: String,
+    val isCustomCharacter: Boolean = false,
+    val profileId: String? = null
 )
 
 data class ChatMessage(
@@ -82,14 +87,36 @@ data class ChatMessage(
     val voiceDurationSec: Int = 0
 )
 
-val defaultChatbots = listOf(
-    ChatbotAvatar("assistant", "AI 助手", "🤖", Color(0xFF7C5CFC), "Hi! I'm your AI assistant. How can I help? ✨"),
-    ChatbotAvatar("teacher", "老师", "👩‍🏫", Color(0xFF4CAF50), "Hello! I'm your teacher. Ask me anything! 📚"),
-    ChatbotAvatar("coding", "程序员", "💻", Color(0xFF2196F3), "Hey! Need help with code? Let's build something! 🚀"),
-    ChatbotAvatar("artist", "艺术家", "🎨", Color(0xFFFF9800), "Hi! Let's explore creativity together! 🌈"),
-    ChatbotAvatar("doctor", "医生", "🩺", Color(0xFFE91E63), "Hello! I can help with health questions. 🏥"),
-    ChatbotAvatar("chef", "厨师", "👨‍🍳", Color(0xFFFF5722), "Hey! Let's cook something delicious! 🍳"),
-)
+// Default AI Chatbots - only 3 (use getDefaultChatbots() composable function)
+object DefaultChatbots {
+    @Composable
+    fun get(): List<ChatbotAvatar> = listOf(
+        ChatbotAvatar(
+            id = "assistant",
+            name = LocalizedString("DEFAULT_ASSISTANT"),
+            emoji = "🤖",
+            color = Color(0xFF7C5CFC),
+            greeting = "Hi! I'm your AI assistant. How can I help? ✨",
+            isCustomCharacter = false
+        ),
+        ChatbotAvatar(
+            id = "teacher",
+            name = LocalizedString("DEFAULT_TEACHER"),
+            emoji = "👩‍🏫",
+            color = Color(0xFF4CAF50),
+            greeting = "Hello! I'm your teacher. Ask me anything! 📚",
+            isCustomCharacter = false
+        ),
+        ChatbotAvatar(
+            id = "coding",
+            name = LocalizedString("DEFAULT_CODER"),
+            emoji = "💻",
+            color = Color(0xFF2196F3),
+            greeting = "Hey! Need help with code? Let's build something! 🚀",
+            isCustomCharacter = false
+        )
+    )
+}
 
 // ─── Main ChatScreen ────────────────────────────────────────────────────────
 
@@ -99,7 +126,8 @@ fun ChatScreen(
     currentUser: FirebaseUser? = null,
     personChat: PersonChat? = null,
     currentProfile: Profile? = null,
-    isDarkMode: Boolean = false
+    isDarkMode: Boolean = false,
+    customCharacters: List<Profile> = emptyList()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -116,8 +144,63 @@ fun ChatScreen(
         Color(0xFFF3F0FF)
     }
 
+    // Combine default chatbots with custom characters
+    val defaultChatbotsList = DefaultChatbots.get()
+
+    // Chatbot order persistence
+    val prefs = remember {
+        context.getSharedPreferences("chatbot_order", Context.MODE_PRIVATE)
+    }
+
+    // Load saved order
+    fun loadSavedOrder(): List<String> {
+        val saved = prefs.getString("order", "") ?: ""
+        return if (saved.isEmpty()) emptyList() else saved.split(",")
+    }
+
+    fun saveOrder(order: List<ChatbotAvatar>) {
+        val ids = order.map { it.id }.joinToString(",")
+        prefs.edit().putString("order", ids).apply()
+    }
+
+    val allChatbots = remember(customCharacters, defaultChatbotsList) {
+        val customBots = customCharacters.map { profile ->
+            ChatbotAvatar(
+                id = "custom_${profile.id}",
+                name = profile.name,
+                emoji = profile.customAvatarPath ?: profile.gender.first().toString(),
+                color = com.example.chatpart.Lavender,
+                greeting = "Hi! I'm ${profile.name}, ${profile.relationship}! 👋",
+                isCustomCharacter = true,
+                profileId = profile.id
+            )
+        }
+        val baseList = defaultChatbotsList + customBots
+
+        // Apply saved order
+        val savedOrder = loadSavedOrder()
+        if (savedOrder.isNotEmpty()) {
+            val ordered = mutableListOf<ChatbotAvatar>()
+            val remaining = baseList.toMutableList()
+
+            // Add items in saved order
+            for (id in savedOrder) {
+                val item = remaining.find { it.id == id }
+                if (item != null) {
+                    ordered.add(item)
+                    remaining.remove(item)
+                }
+            }
+            // Add any new items at the end
+            ordered.addAll(remaining)
+            ordered
+        } else {
+            baseList
+        }
+    }
+
     // Chatbot selection
-    var selectedBot by remember { mutableStateOf(defaultChatbots[0]) }
+    var selectedBot by remember { mutableStateOf(allChatbots.firstOrNull() ?: defaultChatbotsList[0]) }
     var showAvatarPicker by remember { mutableStateOf(false) }
 
     // Chat history manager for persistence
@@ -137,7 +220,7 @@ fun ChatScreen(
                     )
                 }
             } else {
-                listOf(ChatMessage(defaultChatbots[0].greeting, isFromUser = false))
+                listOf(ChatMessage(allChatbots.firstOrNull()?.greeting ?: "Hello!", isFromUser = false))
             }
         })
     }
@@ -253,7 +336,7 @@ fun ChatScreen(
         // ── Avatar Picker ──
         AnimatedVisibility(visible = showAvatarPicker, enter = fadeIn(), exit = fadeOut()) {
             AvatarPickerBar(
-                chatbots = defaultChatbots,
+                chatbots = allChatbots,
                 selectedBot = selectedBot,
                 onSelect = { bot ->
                     selectedBot = bot
@@ -530,6 +613,8 @@ fun AvatarPickerBar(
     selectedBot: ChatbotAvatar,
     onSelect: (ChatbotAvatar) -> Unit
 ) {
+    val context = LocalContext.current
+
     Surface(
         color = Color.White,
         shadowElevation = 4.dp,
@@ -537,46 +622,80 @@ fun AvatarPickerBar(
     ) {
         Column(modifier = Modifier.padding(vertical = 12.dp)) {
             Text(
-                "Choose your chatbot",
+                LocalizedString("CHOOSE_CHATBOT"),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 color = Color.Gray,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
+
+            // Simple horizontal scrolling list
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(chatbots) { bot ->
                     val isSelected = bot.id == selectedBot.id
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (isSelected) bot.color.copy(alpha = 0.12f) else Color(0xFFF5F5F5),
-                        border = if (isSelected) {
-                            androidx.compose.foundation.BorderStroke(2.dp, bot.color)
-                        } else null,
-                        modifier = Modifier
-                            .clickable { onSelect(bot) }
-                            .width(80.dp)
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
-                        ) {
-                            Text(bot.emoji, fontSize = 28.sp)
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                bot.name,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) bot.color else DarkText,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
+                    AvatarPickerItem(
+                        bot = bot,
+                        isSelected = isSelected,
+                        context = context,
+                        onClick = { onSelect(bot) }
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AvatarPickerItem(
+    bot: ChatbotAvatar,
+    isSelected: Boolean,
+    context: android.content.Context,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = if (isSelected) bot.color.copy(alpha = 0.12f) else Color(0xFFF5F5F5),
+        border = if (isSelected) {
+            androidx.compose.foundation.BorderStroke(2.dp, bot.color)
+        } else null,
+        modifier = Modifier
+            .clickable { onClick() }
+            .width(80.dp)
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
+        ) {
+            // Check if it's a custom avatar (file path)
+            if (!bot.emoji.startsWith("/") && !bot.emoji.contains("avatar_") && bot.emoji.length <= 4) {
+                // Emoji avatar
+                Text(bot.emoji, fontSize = 28.sp)
+            } else {
+                // Custom image avatar
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(bot.emoji)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = bot.name,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                bot.name,
+                fontSize = 12.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                color = if (isSelected) bot.color else DarkText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }
@@ -684,9 +803,17 @@ fun RecordingIndicator() {
 fun ChatBubble(
     message: ChatMessage,
     currentUser: FirebaseUser? = null,
-    botAvatar: ChatbotAvatar = defaultChatbots[0],
+    botAvatar: ChatbotAvatar? = null,
     isDarkMode: Boolean = false
 ) {
+    val defaultBot = botAvatar ?: DefaultChatbots.get().firstOrNull() ?: ChatbotAvatar(
+        id = "assistant",
+        name = "AI Assistant",
+        emoji = "🤖",
+        color = Color(0xFF7C5CFC),
+        greeting = "Hi!",
+        isCustomCharacter = false
+    )
     val isUser = message.isFromUser
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
 
@@ -720,11 +847,11 @@ fun ChatBubble(
             if (!isUser) {
                 Surface(
                     shape = CircleShape,
-                    color = botAvatar.color.copy(alpha = 0.15f),
+                    color = defaultBot.color.copy(alpha = 0.15f),
                     modifier = Modifier.size(28.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                        Text(botAvatar.emoji, fontSize = 14.sp)
+                        Text(defaultBot.emoji, fontSize = 14.sp)
                     }
                 }
                 Spacer(Modifier.width(8.dp))

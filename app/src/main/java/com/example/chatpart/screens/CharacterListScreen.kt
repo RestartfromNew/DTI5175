@@ -17,10 +17,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.Lavender
 import com.example.chatpart.Peach
@@ -215,18 +219,35 @@ fun CharacterCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Avatar
+            val context = LocalContext.current
             Surface(
                 shape = CircleShape,
                 color = if (isSelected) Peach.copy(alpha = 0.2f) else Lavender.copy(alpha = 0.2f),
                 modifier = Modifier.size(48.dp)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Text(
-                        character.name.firstOrNull()?.uppercase() ?: "A",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isSelected) Peach else Lavender
-                    )
+                    // Check if character has a custom avatar (file path) or use initial
+                    if (!character.customAvatarPath.isNullOrEmpty() &&
+                        (character.customAvatarPath!!.startsWith("/") || character.customAvatarPath!!.contains("avatar_"))) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(character.customAvatarPath)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Avatar",
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text(
+                            character.name.firstOrNull()?.uppercase() ?: "A",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) Peach else Lavender
+                        )
+                    }
                 }
             }
 
