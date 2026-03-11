@@ -17,6 +17,7 @@ object Prompt {
             - Reply in the SAME language as the user uses.
             - If user writes in English, reply in English.
             - If user writes in Chinese, reply in Chinese.
+            - If user writes in French, reply in French.
             - When user mentions personal preferences, habits, or important info,
               add a hidden tag at the end: [MEM: brief fact in the SAME language as user's message]
             - Tags are invisible to users but important for memory.

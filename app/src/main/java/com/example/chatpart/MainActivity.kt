@@ -462,7 +462,10 @@ fun MainTabScreen(
                     isDarkMode = isDarkMode,
                     customCharacters = customCharacters
                 )
-                1 -> HistoryScreen(isDarkMode = isDarkMode)
+                1 -> HistoryScreen(
+                    isDarkMode = isDarkMode,
+                    characters = customCharacters
+                )
                 2 -> SettingsScreen(
                     currentUser = currentUser,
                     isDarkMode = isDarkMode,

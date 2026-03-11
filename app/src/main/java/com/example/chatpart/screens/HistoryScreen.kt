@@ -1,21 +1,24 @@
 package com.example.chatpart.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -24,18 +27,21 @@ import com.example.chatpart.DarkText
 import com.example.chatpart.Lavender
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
+import com.example.chatpart.data.ChatHistoryManager
+import com.example.chatpart.data.ChatSession
+import com.example.chatpart.domain.Profile
 import androidx.compose.material3.MaterialTheme
-
-data class ChatHistory(
-    val title: String,
-    val lastMessage: String,
-    val time: String,
-    val messageCount: Int
-)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HistoryScreen(isDarkMode: Boolean = false) {
+fun HistoryScreen(
+    isDarkMode: Boolean = false,
+    onChatClick: (String) -> Unit = {},
+    characters: List<Profile> = emptyList()
+) {
+    val context = LocalContext.current
+    val chatHistoryManager = remember { ChatHistoryManager(context) }
+
     val backgroundColor = if (isDarkMode) {
         MaterialTheme.colorScheme.background
     } else {
@@ -47,13 +53,43 @@ fun HistoryScreen(isDarkMode: Boolean = false) {
         Color(0xFFF3F0FF)
     }
 
-    val historyItems = listOf(
-        ChatHistory("Travel Planning", "Can you help me plan a trip to Tokyo?", "Today", 12),
-        ChatHistory("Code Review", "Here's the function I need help with...", "Yesterday", 8),
-        ChatHistory("Recipe Ideas", "I'd like some healthy dinner suggestions", "Feb 9", 15),
-        ChatHistory("Study Notes", "Explain quantum computing in simple terms", "Feb 8", 6),
-        ChatHistory("Creative Writing", "Help me write a short story about...", "Feb 7", 20),
-    )
+    // Load chat sessions
+    val chatSessions = remember { chatHistoryManager.getAllChatSessions() }
+
+    // Map character IDs to names
+    val characterMap = remember(characters) {
+        characters.associateBy { it.id }
+    }
+
+    // Get display name for a character
+    fun getCharacterName(characterId: String): String {
+        return when {
+            characterId == "assistant" -> "AI Assistant"
+            characterId == "teacher" -> "Teacher"
+            characterId == "coding" -> "Coder"
+            characterId.startsWith("custom_") -> {
+                val profileId = characterId.removePrefix("custom_")
+                characterMap[profileId]?.name ?: "Custom Character"
+            }
+            else -> "AI Chat"
+        }
+    }
+
+    // Get emoji for a character
+    fun getCharacterEmoji(characterId: String): String {
+        return when {
+            characterId == "assistant" -> "🤖"
+            characterId == "teacher" -> "👩‍🏫"
+            characterId == "coding" -> "💻"
+            characterId.startsWith("custom_") -> {
+                val profileId = characterId.removePrefix("custom_")
+                characterMap[profileId]?.customAvatarPath?.takeIf { it.length <= 4 }
+                    ?: characterMap[profileId]?.gender?.first()?.toString()
+                    ?: "👤"
+            }
+            else -> "💬"
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -84,22 +120,68 @@ fun HistoryScreen(isDarkMode: Boolean = false) {
             )
         )
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 8.dp)
-        ) {
-            itemsIndexed(historyItems) { index, item ->
-                HistoryCard(item, index)
+        if (chatSessions.isEmpty()) {
+            // Empty state
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.History,
+                        contentDescription = null,
+                        tint = Color.Gray,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "No chat history yet",
+                        fontSize = 18.sp,
+                        color = Color.Gray
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Start a conversation to see it here",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                itemsIndexed(chatSessions) { index, session ->
+                    HistoryCard(
+                        session = session,
+                        title = getCharacterName(session.characterId),
+                        emoji = getCharacterEmoji(session.characterId),
+                        index = index,
+                        onClick = { onChatClick(session.characterId) },
+                        onDelete = { chatHistoryManager.clearMessages(session.characterId) }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun HistoryCard(item: ChatHistory, index: Int) {
+fun HistoryCard(
+    session: ChatSession,
+    title: String,
+    emoji: String,
+    index: Int,
+    onClick: () -> Unit,
+    onDelete: () -> Unit
+) {
     val iconColors = listOf(Peach, Lavender, Color(0xFF4CAF50), Color(0xFF2196F3), Color(0xFFFF5722))
     val iconColor = iconColors[index % iconColors.size]
 
@@ -107,11 +189,12 @@ fun HistoryCard(item: ChatHistory, index: Int) {
         shape = RoundedCornerShape(20.dp),
         color = Color.White,
         shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
     ) {
         Row(
-            modifier = Modifier
-                .padding(16.dp),
+            modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Icon
@@ -121,11 +204,9 @@ fun HistoryCard(item: ChatHistory, index: Int) {
                 modifier = Modifier.size(48.dp)
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    Icon(
-                        Icons.Rounded.ChatBubbleOutline,
-                        contentDescription = null,
-                        tint = iconColor,
-                        modifier = Modifier.size(24.dp)
+                    Text(
+                        emoji,
+                        fontSize = 24.sp
                     )
                 }
             }
@@ -140,20 +221,20 @@ fun HistoryCard(item: ChatHistory, index: Int) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        item.title,
+                        title,
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp,
                         color = DarkText
                     )
                     Text(
-                        item.time,
+                        session.getFormattedTime(),
                         fontSize = 12.sp,
                         color = Color.Gray
                     )
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    item.lastMessage,
+                    session.lastMessage,
                     fontSize = 14.sp,
                     color = Color.Gray,
                     maxLines = 1,
@@ -166,7 +247,7 @@ fun HistoryCard(item: ChatHistory, index: Int) {
                         color = iconColor.copy(alpha = 0.1f)
                     ) {
                         Text(
-                            "${item.messageCount} messages",
+                            "${session.messageCount} messages",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                             fontSize = 11.sp,
                             color = iconColor,
@@ -174,6 +255,15 @@ fun HistoryCard(item: ChatHistory, index: Int) {
                         )
                     }
                 }
+            }
+
+            // Delete button
+            IconButton(onClick = onDelete) {
+                Icon(
+                    Icons.Rounded.Delete,
+                    contentDescription = "Delete",
+                    tint = Color.Gray
+                )
             }
         }
     }

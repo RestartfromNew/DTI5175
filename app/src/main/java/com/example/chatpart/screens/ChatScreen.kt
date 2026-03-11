@@ -2,7 +2,6 @@ package com.example.chatpart.screens
 
 import android.Manifest
 import android.content.Context
-import android.content.SharedPreferences
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -147,22 +146,6 @@ fun ChatScreen(
     // Combine default chatbots with custom characters
     val defaultChatbotsList = DefaultChatbots.get()
 
-    // Chatbot order persistence
-    val prefs = remember {
-        context.getSharedPreferences("chatbot_order", Context.MODE_PRIVATE)
-    }
-
-    // Load saved order
-    fun loadSavedOrder(): List<String> {
-        val saved = prefs.getString("order", "") ?: ""
-        return if (saved.isEmpty()) emptyList() else saved.split(",")
-    }
-
-    fun saveOrder(order: List<ChatbotAvatar>) {
-        val ids = order.map { it.id }.joinToString(",")
-        prefs.edit().putString("order", ids).apply()
-    }
-
     val allChatbots = remember(customCharacters, defaultChatbotsList) {
         val customBots = customCharacters.map { profile ->
             ChatbotAvatar(
@@ -175,28 +158,7 @@ fun ChatScreen(
                 profileId = profile.id
             )
         }
-        val baseList = defaultChatbotsList + customBots
-
-        // Apply saved order
-        val savedOrder = loadSavedOrder()
-        if (savedOrder.isNotEmpty()) {
-            val ordered = mutableListOf<ChatbotAvatar>()
-            val remaining = baseList.toMutableList()
-
-            // Add items in saved order
-            for (id in savedOrder) {
-                val item = remaining.find { it.id == id }
-                if (item != null) {
-                    ordered.add(item)
-                    remaining.remove(item)
-                }
-            }
-            // Add any new items at the end
-            ordered.addAll(remaining)
-            ordered
-        } else {
-            baseList
-        }
+        defaultChatbotsList + customBots
     }
 
     // Chatbot selection
@@ -225,8 +187,8 @@ fun ChatScreen(
         })
     }
 
-    // Save messages whenever they change
-    LaunchedEffect(messages) {
+    // Save messages whenever they change (per character)
+    LaunchedEffect(messages, selectedBot) {
         val dataMessages = messages.map {
             ChatMessageData(
                 text = it.text,
@@ -235,7 +197,7 @@ fun ChatScreen(
                 voiceDurationSec = it.voiceDurationSec
             )
         }
-        chatHistoryManager.saveMessages(dataMessages)
+        chatHistoryManager.saveMessages(selectedBot.id, dataMessages)
     }
 
     val listState = rememberLazyListState()
@@ -629,7 +591,7 @@ fun AvatarPickerBar(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
-            // Simple horizontal scrolling list
+            // Horizontal scrolling list
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -653,6 +615,7 @@ private fun AvatarPickerItem(
     bot: ChatbotAvatar,
     isSelected: Boolean,
     context: android.content.Context,
+    elevation: androidx.compose.ui.unit.Dp = 0.dp,
     onClick: () -> Unit
 ) {
     Surface(
@@ -661,6 +624,7 @@ private fun AvatarPickerItem(
         border = if (isSelected) {
             androidx.compose.foundation.BorderStroke(2.dp, bot.color)
         } else null,
+        shadowElevation = elevation,
         modifier = Modifier
             .clickable { onClick() }
             .width(80.dp)

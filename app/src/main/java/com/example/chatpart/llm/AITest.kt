@@ -15,7 +15,7 @@ class AITest : LlmClient {
 
     override suspend fun reply(systemPrompt: String, userText: String): Result {
         return try {
-            val finalPrompt = "$systemPrompt \nPlease show the reply including [EMOTION: 状态] tag. Select one from: HAPPY, SAD, ANGRY, SHY, NEUTRAL. Reply in the SAME language as the user's message."
+            val finalPrompt = "$systemPrompt \nPlease include [EMOTION: emotion] tag at the end of your reply. Select emotion from: HAPPY, SAD, ANGRY, SHY, NEUTRAL. Reply in the SAME language as the user's message."
 
             val response = generativeModel.generateContent(finalPrompt + userText)
             val fullText = response.text ?: ""
