@@ -13,7 +13,10 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -53,8 +56,13 @@ fun HistoryScreen(
         Color(0xFFF3F0FF)
     }
 
-    // Load chat sessions
-    val chatSessions = remember { chatHistoryManager.getAllChatSessions() }
+    // Load chat sessions with state for refresh
+    var chatSessions by remember { mutableStateOf(chatHistoryManager.getAllChatSessions()) }
+
+    // Function to refresh chat sessions
+    fun refreshChatSessions() {
+        chatSessions = chatHistoryManager.getAllChatSessions()
+    }
 
     // Map character IDs to names
     val characterMap = remember(characters) {
@@ -165,7 +173,10 @@ fun HistoryScreen(
                         emoji = getCharacterEmoji(session.characterId),
                         index = index,
                         onClick = { onChatClick(session.characterId) },
-                        onDelete = { chatHistoryManager.clearMessages(session.characterId) }
+                        onDelete = {
+                            chatHistoryManager.clearMessages(session.characterId)
+                            refreshChatSessions()
+                        }
                     )
                 }
             }
