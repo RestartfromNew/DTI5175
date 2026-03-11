@@ -128,7 +128,13 @@ object EnglishStrings {
         "DEFAULT_ASSISTANT" to "AI Assistant",
         "DEFAULT_TEACHER" to "Teacher",
         "DEFAULT_CODER" to "Coder",
-        "CHOOSE_CHATBOT" to "Choose your chatbot"
+        "CHOOSE_CHATBOT" to "Choose your chatbot",
+
+        // Settings sections
+        "GENERAL" to "General",
+        "AI_SETTINGS" to "AI Settings",
+        "SELECT_LANGUAGE" to "Select Language",
+        "STT_CONVERT" to "Convert to text"
     )
 }
 
@@ -260,7 +266,13 @@ object FrenchStrings {
         "DEFAULT_ASSISTANT" to "Assistant IA",
         "DEFAULT_TEACHER" to "Enseignant",
         "DEFAULT_CODER" to "Programmeur",
-        "CHOOSE_CHATBOT" to "Choisissez votre chatbot"
+        "CHOOSE_CHATBOT" to "Choisissez votre chatbot",
+
+        // Settings sections
+        "GENERAL" to "Général",
+        "AI_SETTINGS" to "Paramètres IA",
+        "SELECT_LANGUAGE" to "Sélectionner la langue",
+        "STT_CONVERT" to "Convertir en texte"
     )
 }
 
@@ -392,6 +404,12 @@ object ChineseStrings {
         "DEFAULT_ASSISTANT" to "AI助手",
         "DEFAULT_TEACHER" to "老师",
         "DEFAULT_CODER" to "程序员",
-        "CHOOSE_CHATBOT" to "选择你的AI助手"
+        "CHOOSE_CHATBOT" to "选择你的AI助手",
+
+        // Settings sections
+        "GENERAL" to "常规",
+        "AI_SETTINGS" to "AI 设置",
+        "SELECT_LANGUAGE" to "选择语言",
+        "STT_CONVERT" to "转换为文字"
     )
 }

@@ -21,8 +21,9 @@ class ChatHistoryManager(private val context: Context) {
     // Save messages for a specific character
     fun saveMessages(characterId: String, messages: List<ChatMessageData>) {
         val trimmedMessages = messages.takeLast(MAX_MESSAGES)
-        val json = trimmedMessages.joinToString("|||") { msg ->
-            "${msg.text}|||${msg.isFromUser}|||${msg.isVoice}|||${msg.voiceDurationSec}"
+        // Use \u0001 (SOH) between messages, \u0002 (STX) between fields — never appears in user text
+        val json = trimmedMessages.joinToString("\u0001") { msg ->
+            "${msg.text}\u0002${msg.isFromUser}\u0002${msg.isVoice}\u0002${msg.voiceDurationSec}"
         }
         prefs.edit().putString("messages_$characterId", json).apply()
 
@@ -39,8 +40,8 @@ class ChatHistoryManager(private val context: Context) {
     fun loadMessages(characterId: String): List<ChatMessageData> {
         val json = prefs.getString("messages_$characterId", "") ?: ""
         if (json.isEmpty()) return emptyList()
-        return json.split("|||").mapNotNull { parts ->
-            val arr = parts.split("|||")
+        return json.split("\u0001").mapNotNull { parts ->
+            val arr = parts.split("\u0002")
             if (arr.size >= 2) {
                 try {
                     ChatMessageData(

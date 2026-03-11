@@ -26,6 +26,9 @@ import com.example.chatpart.DarkText
 import com.example.chatpart.Lavender
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
+import com.example.chatpart.i18n.LanguageManager
+import com.example.chatpart.i18n.Languages
+import com.example.chatpart.i18n.Language
 import com.google.firebase.auth.FirebaseUser
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,11 +36,19 @@ import com.google.firebase.auth.FirebaseUser
 fun SettingsScreen(
     currentUser: FirebaseUser? = null,
     isDarkMode: Boolean = false,
+    currentLanguage: String = "en",
     onDarkModeChange: (Boolean) -> Unit = {},
     onNavigateToCharacters: () -> Unit = {},
-    onSignOut: () -> Unit = {}
+    onSignOut: () -> Unit = {},
+    onLanguageChange: (String) -> Unit = {}
 ) {
     var notificationsEnabled by remember { mutableStateOf(true) }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val languageManager = remember { LanguageManager(context) }
+    var showLanguageDialog by remember { mutableStateOf(false) }
+
+    fun t(key: String) = Languages.getString(currentLanguage, key)
 
     // Theme-aware colors
     val backgroundColor = if (isDarkMode) {
@@ -76,7 +87,7 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.width(10.dp))
                     Text(
-                        "Settings",
+                        t("SETTINGS"),
                         fontWeight = FontWeight.Bold,
                         fontSize = 22.sp,
                         color = textColor
@@ -151,7 +162,7 @@ fun SettingsScreen(
 
             // General Section
             Text(
-                "General",
+                t("GENERAL"),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 color = subtitleColor,
@@ -168,7 +179,7 @@ fun SettingsScreen(
                     SettingsToggleItem(
                         icon = Icons.Rounded.DarkMode,
                         iconColor = Lavender,
-                        title = "Dark Mode",
+                        title = t("DARK_MODE"),
                         subtitle = "Switch to dark theme",
                         checked = isDarkMode,
                         onCheckedChange = { onDarkModeChange(it) },
@@ -181,7 +192,7 @@ fun SettingsScreen(
                     SettingsToggleItem(
                         icon = Icons.Rounded.Notifications,
                         iconColor = Peach,
-                        title = "Notifications",
+                        title = t("NOTIFICATIONS"),
                         subtitle = "Enable push notifications",
                         checked = notificationsEnabled,
                         onCheckedChange = { notificationsEnabled = it },
@@ -192,7 +203,7 @@ fun SettingsScreen(
 
             // AI Settings Section
             Text(
-                "AI Settings",
+                t("AI_SETTINGS"),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 color = subtitleColor,
@@ -231,7 +242,7 @@ fun SettingsScreen(
                     SettingsNavItem(
                         icon = Icons.Rounded.Person,
                         iconColor = Peach,
-                        title = "My Characters",
+                        title = t("MANAGE_CHARACTERS"),
                         subtitle = "Manage AI characters",
                         onClick = onNavigateToCharacters,
                         isDarkMode = isDarkMode
@@ -239,8 +250,9 @@ fun SettingsScreen(
                     SettingsNavItem(
                         icon = Icons.Rounded.Translate,
                         iconColor = Color(0xFFFF9800),
-                        title = "Language",
-                        subtitle = "English",
+                        title = t("LANGUAGE"),
+                        subtitle = Languages.getLanguageByCode(currentLanguage)?.displayName ?: "English",
+                        onClick = { showLanguageDialog = true },
                         isDarkMode = isDarkMode
                     )
                 }
@@ -248,7 +260,7 @@ fun SettingsScreen(
 
             // About Section
             Text(
-                "About",
+                t("ABOUT"),
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 14.sp,
                 color = subtitleColor,
@@ -265,7 +277,7 @@ fun SettingsScreen(
                     SettingsNavItem(
                         icon = Icons.Rounded.Info,
                         iconColor = Lavender,
-                        title = "Version",
+                        title = t("VERSION"),
                         subtitle = "1.0.0",
                         isDarkMode = isDarkMode
                     )
@@ -276,7 +288,7 @@ fun SettingsScreen(
                     SettingsNavItem(
                         icon = Icons.Rounded.PrivacyTip,
                         iconColor = Color(0xFFE91E63),
-                        title = "Privacy Policy",
+                        title = t("PRIVACY_POLICY"),
                         subtitle = "",
                         isDarkMode = isDarkMode
                     )
@@ -306,7 +318,7 @@ fun SettingsScreen(
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Sign Out",
+                        t("SIGN_OUT"),
                         fontWeight = FontWeight.SemiBold,
                         fontSize = 16.sp
                     )
@@ -315,6 +327,55 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
         }
+    }
+
+    // Language selection dialog
+    if (showLanguageDialog) {
+        AlertDialog(
+            onDismissRequest = { showLanguageDialog = false },
+            title = {
+                Text(
+                    t("SELECT_LANGUAGE"),
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column {
+                    Languages.SUPPORTED_LANGUAGES.forEach { lang ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    languageManager.setLanguage(lang.code)
+                                    onLanguageChange(lang.code)
+                                    showLanguageDialog = false
+                                }
+                                .padding(vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = currentLanguage == lang.code,
+                                onClick = {
+                                    languageManager.setLanguage(lang.code)
+                                    onLanguageChange(lang.code)
+                                    showLanguageDialog = false
+                                }
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = lang.displayName,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showLanguageDialog = false }) {
+                    Text("OK")
+                }
+            }
+        )
     }
 }
 

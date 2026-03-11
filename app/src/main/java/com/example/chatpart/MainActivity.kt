@@ -48,6 +48,8 @@ import com.example.chatpart.screens.CharacterDetailScreen
 import com.example.chatpart.screens.LanguageSelectionScreen
 import com.example.chatpart.screens.VoiceCloneScreen
 import com.example.chatpart.data.CharacterStorage
+import com.example.chatpart.i18n.LanguageManager
+import com.example.chatpart.i18n.Languages
 import com.example.chatpart.ui.theme.ChatPartTheme
 import com.example.chatpart.ui.theme.Peach
 import com.google.firebase.Firebase
@@ -387,6 +389,10 @@ class MainActivity : ComponentActivity() {
                                 authManager.signOut()
                                 currentUser = null
                                 currentPage = PAGE_LOGIN
+                            },
+                            onSelectCharacter = { profile ->
+                                characterStorage.saveSelectedCharacterId(profile.id)
+                                selectedCharacter = profile
                             }
                         )
                     }
@@ -405,14 +411,22 @@ fun MainTabScreen(
     customCharacters: List<Profile> = emptyList(),
     onDarkModeChange: (Boolean) -> Unit = {},
     onNavigateToCharacters: () -> Unit = {},
-    onSignOut: () -> Unit = {}
+    onSignOut: () -> Unit = {},
+    onSelectCharacter: (Profile) -> Unit = {}
 ) {
+    val context = LocalContext.current
+    val langManager = remember { LanguageManager(context) }
+    var currentLanguage by remember { mutableStateOf(langManager.getCurrentLanguage()) }
+
+    fun t(key: String) = Languages.getString(currentLanguage, key)
+
     val tabs = listOf(
-        TabItem("Chat", Icons.Filled.ChatBubble, Icons.Outlined.ChatBubbleOutline),
-        TabItem("History", Icons.Filled.History, Icons.Outlined.History),
-        TabItem("Settings", Icons.Filled.Settings, Icons.Outlined.Settings)
+        TabItem(t("CHAT"), Icons.Filled.ChatBubble, Icons.Outlined.ChatBubbleOutline),
+        TabItem(t("HISTORY"), Icons.Filled.History, Icons.Outlined.History),
+        TabItem(t("SETTINGS"), Icons.Filled.Settings, Icons.Outlined.Settings)
     )
     var selectedTab by remember { mutableIntStateOf(0) }
+    var chatTargetBotId by remember { mutableStateOf<String?>(null) }
 
     // Theme-aware colors
     val navBarColor = if (isDarkMode) Color(0xFF1E1E1E) else Color.White
@@ -460,18 +474,78 @@ fun MainTabScreen(
                     personChat = personChat,
                     currentProfile = currentProfile,
                     isDarkMode = isDarkMode,
-                    customCharacters = customCharacters
+                    customCharacters = customCharacters,
+                    targetBotId = chatTargetBotId,
+                    currentLanguage = currentLanguage
                 )
                 1 -> HistoryScreen(
                     isDarkMode = isDarkMode,
-                    characters = customCharacters
+                    characters = customCharacters,
+                    onChatClick = { characterId ->
+                        chatTargetBotId = characterId
+                        // Find the character by ID (handle "custom_" prefix)
+                        val actualId = if (characterId.startsWith("custom_")) {
+                            characterId.removePrefix("custom_")
+                        } else {
+                            characterId
+                        }
+                        val character = customCharacters.find { it.id == actualId }
+                        if (character != null) {
+                            onSelectCharacter(character)
+                        } else {
+                            // Handle default bots (assistant, teacher, coding)
+                            val defaultBotProfile = when (characterId) {
+                                "assistant" -> Profile(
+                                    id = "assistant",
+                                    name = "AI Assistant",
+                                    gender = "其他",
+                                    relationship = "AI助手",
+                                    background = "你是一个AI助手",
+                                    personality = "helpful",
+                                    speakStyle = listOf("helpful"),
+                                    doRules = listOf("帮助用户"),
+                                    dontRules = listOf("不要假装是人类")
+                                )
+                                "teacher" -> Profile(
+                                    id = "teacher",
+                                    name = "Teacher",
+                                    gender = "女",
+                                    relationship = "老师",
+                                    background = "你是一位老师",
+                                    personality = "knowledgeable",
+                                    speakStyle = listOf("教学风格"),
+                                    doRules = listOf("教导用户"),
+                                    dontRules = listOf("不要给出错误信息")
+                                )
+                                "coding" -> Profile(
+                                    id = "coding",
+                                    name = "Coder",
+                                    gender = "其他",
+                                    relationship = "编程助手",
+                                    background = "你是一个编程助手",
+                                    personality = "technical",
+                                    speakStyle = listOf("技术风格"),
+                                    doRules = listOf("帮助编程"),
+                                    dontRules = listOf("不要写恶意代码")
+                                )
+                                else -> null
+                            }
+                            if (defaultBotProfile != null) {
+                                onSelectCharacter(defaultBotProfile)
+                            }
+                        }
+                        // Switch to Chat tab
+                        selectedTab = 0
+                    }
                 )
                 2 -> SettingsScreen(
                     currentUser = currentUser,
                     isDarkMode = isDarkMode,
+                    currentLanguage = currentLanguage,
                     onDarkModeChange = onDarkModeChange,
                     onNavigateToCharacters = onNavigateToCharacters,
-                    onSignOut = onSignOut
+                    onSignOut = onSignOut,
+                    onLanguageChange = { code -> currentLanguage = code }
                 )
             }
         }

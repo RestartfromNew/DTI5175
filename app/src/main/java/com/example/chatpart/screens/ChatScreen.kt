@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +64,7 @@ import com.example.chatpart.data.ChatHistoryManager
 import com.example.chatpart.data.ChatMessageData
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.i18n.LocalizedString
+import com.example.chatpart.i18n.Languages
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
 import kotlinx.coroutines.launch
@@ -126,7 +128,9 @@ fun ChatScreen(
     personChat: PersonChat? = null,
     currentProfile: Profile? = null,
     isDarkMode: Boolean = false,
-    customCharacters: List<Profile> = emptyList()
+    customCharacters: List<Profile> = emptyList(),
+    targetBotId: String? = null,
+    currentLanguage: String = "en"
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -165,13 +169,24 @@ fun ChatScreen(
     var selectedBot by remember { mutableStateOf(allChatbots.firstOrNull() ?: defaultChatbotsList[0]) }
     var showAvatarPicker by remember { mutableStateOf(false) }
 
+    // Navigate to specific bot when coming from History screen
+    LaunchedEffect(targetBotId) {
+        if (targetBotId != null) {
+            val targetBot = allChatbots.find { it.id == targetBotId }
+            if (targetBot != null) {
+                selectedBot = targetBot
+                showAvatarPicker = false
+            }
+        }
+    }
+
     // Chat history manager for persistence
     val chatHistoryManager = remember { ChatHistoryManager(context) }
 
-    // Load saved messages or use default greeting
-    var messages by remember {
+    // Load saved messages for the selected bot, or use default greeting
+    var messages by remember(selectedBot) {
         mutableStateOf(run {
-            val saved = chatHistoryManager.loadMessages()
+            val saved = chatHistoryManager.loadMessages(selectedBot.id)
             if (saved.isNotEmpty()) {
                 saved.map {
                     ChatMessage(
@@ -182,7 +197,7 @@ fun ChatScreen(
                     )
                 }
             } else {
-                listOf(ChatMessage(allChatbots.firstOrNull()?.greeting ?: "Hello!", isFromUser = false))
+                listOf(ChatMessage(selectedBot.greeting, isFromUser = false))
             }
         })
     }
@@ -207,9 +222,6 @@ fun ChatScreen(
     var isVoiceMode by remember { mutableStateOf(false) }
     var isRecording by remember { mutableStateOf(false) }
     var isLoading by remember { mutableStateOf(false) }
-
-    // Speech to text state
-    var isSpeechToTextMode by remember { mutableStateOf(false) }
 
     // Chat history for AI
     var chatHistory by remember { mutableStateOf(listOf<Message>()) }
@@ -237,6 +249,12 @@ fun ChatScreen(
             @Suppress("DEPRECATION")
             vibrator.vibrate(50)
         }
+    }
+
+    // Text-to-Speech engine
+    val tts = remember { TextToSpeech(context) { } }
+    DisposableEffect(Unit) {
+        onDispose { tts.shutdown() }
     }
 
     // Permission
@@ -324,7 +342,9 @@ fun ChatScreen(
                     message = message,
                     currentUser = currentUser,
                     botAvatar = selectedBot,
-                    isDarkMode = isDarkMode
+                    isDarkMode = isDarkMode,
+                    onTts = { text -> tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null) },
+                    onStt = { /* TODO: connect STT API here — receives the ChatMessage */ _ -> }
                 )
             }
         }
@@ -370,6 +390,7 @@ fun ChatScreen(
                         VoiceRecordButton(
                             isRecording = isRecording,
                             modifier = Modifier.weight(1f),
+                            currentLanguage = currentLanguage,
                             onStartRecording = {
                                 triggerHapticFeedback()
                                 if (hasAudioPermission) {
@@ -422,7 +443,7 @@ fun ChatScreen(
                         OutlinedTextField(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            placeholder = { Text("Type a message...", color = textFieldPlaceholderColor) },
+                            placeholder = { Text(Languages.getString(currentLanguage, "TYPE_MESSAGE"), color = textFieldPlaceholderColor) },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(24.dp),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -437,56 +458,6 @@ fun ChatScreen(
                             maxLines = 3
                         )
 
-                        Spacer(Modifier.width(4.dp))
-
-                        // Speech to Text button
-                        Surface(
-                            onClick = {
-                                triggerHapticFeedback()
-                                if (!hasAudioPermission) {
-                                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                } else {
-                                    if (!isSpeechToTextMode) {
-                                        // Start speech recognition
-                                        isSpeechToTextMode = true
-                                        val started = audioManager.startRecording()
-                                        if (started) {
-                                            isRecording = true
-                                        }
-                                    } else {
-                                        // Stop speech recognition
-                                        isSpeechToTextMode = false
-                                        isRecording = false
-                                        val audioFile = audioManager.stopRecording()
-                                        if (audioFile != null && audioFile.exists()) {
-                                            // Use mock transcription for now
-                                            scope.launch {
-                                                val result = voiceApi.transcribeAudio(audioFile)
-                                                result.onSuccess { text ->
-                                                    inputText = inputText + text
-                                                }
-                                                result.onFailure {
-                                                    // Show error but don't replace text
-                                                    Log.e("ChatScreen", "Speech to text failed")
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            shape = CircleShape,
-                            color = if (isSpeechToTextMode) Peach else Lavender.copy(alpha = 0.5f),
-                            modifier = Modifier.size(44.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                Icon(
-                                    Icons.Filled.Mic,
-                                    contentDescription = "Speech to text",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
                     }
 
                     Spacer(Modifier.width(4.dp))
@@ -591,7 +562,6 @@ fun AvatarPickerBar(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             )
 
-            // Horizontal scrolling list
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -615,7 +585,6 @@ private fun AvatarPickerItem(
     bot: ChatbotAvatar,
     isSelected: Boolean,
     context: android.content.Context,
-    elevation: androidx.compose.ui.unit.Dp = 0.dp,
     onClick: () -> Unit
 ) {
     Surface(
@@ -624,7 +593,6 @@ private fun AvatarPickerItem(
         border = if (isSelected) {
             androidx.compose.foundation.BorderStroke(2.dp, bot.color)
         } else null,
-        shadowElevation = elevation,
         modifier = Modifier
             .clickable { onClick() }
             .width(80.dp)
@@ -633,8 +601,22 @@ private fun AvatarPickerItem(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
         ) {
-            // Check if it's a custom avatar (file path)
-            if (!bot.emoji.startsWith("/") && !bot.emoji.contains("avatar_") && bot.emoji.length <= 4) {
+            // Check if it's a custom avatar (file path) or emoji
+            val isEmoji = !bot.emoji.startsWith("/") &&
+                          !bot.emoji.contains("avatar_") &&
+                          !bot.emoji.contains(".jpg") &&
+                          !bot.emoji.contains(".png") &&
+                          !bot.emoji.contains(".webp") &&
+                          bot.emoji.all {
+                              val c = it.code
+                              c in 0x2600..0x27BF ||  // Misc Symbols, Dingbats
+                              c in 0xD800..0xDFFF ||  // Surrogate pairs (emoji > U+FFFF)
+                              c == 0x200D ||           // ZWJ (Zero Width Joiner, e.g. 👩‍🏫)
+                              c == 0xFE0F ||           // Variation Selector-16
+                              c == 0x20E3              // Combining Enclosing Keycap
+                          }
+
+            if (isEmoji) {
                 // Emoji avatar
                 Text(bot.emoji, fontSize = 28.sp)
             } else {
@@ -670,6 +652,7 @@ private fun AvatarPickerItem(
 fun VoiceRecordButton(
     isRecording: Boolean,
     modifier: Modifier = Modifier,
+    currentLanguage: String = "en",
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit
 ) {
@@ -726,7 +709,7 @@ fun VoiceRecordButton(
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(
-                    if (isRecording) "Release to send" else "Hold to talk",
+                    if (isRecording) Languages.getString(currentLanguage, "RELEASE_TO_SEND") else Languages.getString(currentLanguage, "HOLD_TO_TALK"),
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp,
                     color = textColor
@@ -768,7 +751,9 @@ fun ChatBubble(
     message: ChatMessage,
     currentUser: FirebaseUser? = null,
     botAvatar: ChatbotAvatar? = null,
-    isDarkMode: Boolean = false
+    isDarkMode: Boolean = false,
+    onTts: ((String) -> Unit)? = null,
+    onStt: ((ChatMessage) -> Unit)? = null
 ) {
     val defaultBot = botAvatar ?: DefaultChatbots.get().firstOrNull() ?: ChatbotAvatar(
         id = "assistant",
@@ -799,10 +784,11 @@ fun ChatBubble(
         RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp)
     }
 
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = alignment
-    ) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = alignment
+        ) {
         Row(
             verticalAlignment = Alignment.Bottom,
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
@@ -894,6 +880,35 @@ fun ChatBubble(
                             )
                         }
                     }
+                }
+            }
+        }
+        }
+        if (!isUser && onTts != null && !message.isVoice) {
+            IconButton(
+                onClick = { onTts(message.text) },
+                modifier = Modifier.padding(start = 36.dp).size(28.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.VolumeUp,
+                    contentDescription = "Read aloud",
+                    tint = Color.Gray.copy(alpha = 0.6f),
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+        if (isUser && message.isVoice && onStt != null) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                IconButton(
+                    onClick = { onStt(message) },
+                    modifier = Modifier.padding(end = 36.dp).size(28.dp)
+                ) {
+                    Icon(
+                        Icons.Rounded.Subtitles,
+                        contentDescription = "Convert to text",
+                        tint = Peach.copy(alpha = 0.7f),
+                        modifier = Modifier.size(14.dp)
+                    )
                 }
             }
         }
