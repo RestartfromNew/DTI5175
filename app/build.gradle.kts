@@ -5,6 +5,9 @@ val localProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 val aiKey = localProps.getProperty("API_Key") ?: ""
+val minimaxApiKey = localProps.getProperty("MINIMAX_API_KEY") ?: ""
+val minimaxGroupId = localProps.getProperty("MINIMAX_GROUP_ID") ?: ""
+val minimaxBaseUrl = localProps.getProperty("MINIMAX_BASE_URL") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -30,6 +33,9 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "API_Key", "\"$aiKey\"")
+        buildConfigField("String", "MINIMAX_API_KEY", "\"$minimaxApiKey\"")
+        buildConfigField("String", "MINIMAX_GROUP_ID", "\"$minimaxGroupId\"")
+        buildConfigField("String", "MINIMAX_BASE_URL", "\"$minimaxBaseUrl\"")
     }
 
     buildTypes {
@@ -96,4 +102,9 @@ dependencies {
 
     // ONNX Runtime
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.0")
+
+    // MiniMax API - OkHttp & Gson
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("com.google.code.gson:gson:2.10.1")
 }

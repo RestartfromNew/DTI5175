@@ -59,7 +59,7 @@ import com.google.firebase.analytics.logEvent
 import com.google.firebase.auth.FirebaseUser
 
 // ChatPart AI components
-import com.example.chatpart.llm.AITest
+import com.example.chatpart.llm.MiniMaxLlmClient
 import com.example.chatpart.llm.EmbeddingLlm
 import com.example.chatpart.memory.InMemoryStore
 import com.example.chatpart.data.PersonChat
@@ -77,7 +77,7 @@ data class TabItem(
 class MainActivity : ComponentActivity() {
 
     // AI Components
-    private val llmClient = AITest()
+    private val llmClient = MiniMaxLlmClient()
     private val memoryStore = InMemoryStore()
     private val embeddingClient = EmbeddingLlm()
     private val personChat = PersonChat(llmClient, memoryStore, embeddingClient)

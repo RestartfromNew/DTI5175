@@ -8,7 +8,7 @@ import android.app.Application
 import com.example.chatpart.llm.EmbeddingLlm
 import com.example.chatpart.memory.InMemoryStore
 import com.example.chatpart.data.PersonChat
-import com.example.chatpart.llm.AITest
+import com.example.chatpart.llm.MiniMaxLlmClient
 
 class MyApp : Application() {
     lateinit var personChat: PersonChat
@@ -19,7 +19,7 @@ class MyApp : Application() {
 
         val embedding = EmbeddingLlm()
         val memory = InMemoryStore()
-        val llm = AITest()
+        val llm = MiniMaxLlmClient()
 
         // 2. 组装成全局唯一的引擎
         personChat = PersonChat(llm, memory, embedding)

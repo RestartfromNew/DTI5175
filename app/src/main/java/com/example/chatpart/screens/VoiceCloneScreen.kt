@@ -3,6 +3,7 @@ package com.example.chatpart.screens
 import android.Manifest
 import android.content.Context
 import android.os.Build
+import android.util.Log
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
+import com.example.chatpart.api.MiniMaxVoiceCloneManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.voice.AudioRecordManager
@@ -77,6 +79,7 @@ fun VoiceCloneScreen(
     var recordedFile by remember { mutableStateOf<File?>(null) }
     var isCloning by remember { mutableStateOf(false) }
     var cloneSuccess by remember { mutableStateOf(false) }
+    var cloneError by remember { mutableStateOf<String?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
 
     // Coroutine scope
@@ -98,11 +101,15 @@ fun VoiceCloneScreen(
 
     // Function to trigger haptic feedback
     fun triggerHapticFeedback() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(50)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(50)
+            }
+        } catch (e: Exception) {
+            Log.e("VoiceCloneScreen", "Haptic feedback failed: ${e.message}")
         }
     }
 
@@ -319,6 +326,18 @@ fun VoiceCloneScreen(
                         fontWeight = FontWeight.Bold
                     )
                 }
+            } else if (cloneError != null) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = cloneError!!,
+                        fontSize = 14.sp,
+                        color = Color(0xFFE53935),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -344,17 +363,33 @@ fun VoiceCloneScreen(
 
                 Button(
                     onClick = {
+                        // Check minimum duration (MiniMax requires at least 10 seconds)
+                        if (recordingDuration < 10) {
+                            cloneError = "Recording too short. Please record at least 10 seconds."
+                            return@Button
+                        }
                         // Start cloning
                         isCloning = true
+                        cloneError = null
                         // Launch cloning in background
-                        val manager = com.example.chatpart.i18n.VoiceCloneManager()
+                        val manager = MiniMaxVoiceCloneManager(context)
                         scope.launch {
-                            val result = manager.cloneVoice(recordedFile, characterName)
-                            isCloning = false
-                            result.onSuccess { voiceId ->
-                                cloneSuccess = true
-                                delay(1000)
-                                onVoiceCloned(voiceId)
+                            if (recordedFile != null) {
+                                val result = manager.cloneVoice(recordedFile!!, characterName)
+                                isCloning = false
+                                result.onSuccess { voiceId ->
+                                    cloneSuccess = true
+                                    cloneError = null
+                                    delay(1000)
+                                    onVoiceCloned(voiceId)
+                                }.onFailure { error ->
+                                    Log.e("VoiceClone", "Clone failed: ${error.message}")
+                                    cloneError = "Clone failed: ${error.message}"
+                                }
+                            } else {
+                                isCloning = false
+                                cloneError = "No recorded file available"
+                                Log.e("VoiceClone", "No recorded file available")
                             }
                         }
                     },

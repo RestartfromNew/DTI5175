@@ -2,12 +2,14 @@ package com.example.chatpart.screens
 
 import android.Manifest
 import android.content.Context
+import android.media.MediaPlayer
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import com.example.chatpart.api.MiniMaxAudioClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -51,23 +53,24 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.CompletableDeferred
 import com.example.chatpart.DarkText
 import com.example.chatpart.Lavender
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
-import com.example.chatpart.api.MockVoiceApiService
-import com.example.chatpart.api.VoiceApiService
 import com.example.chatpart.voice.AudioRecordManager
 import com.google.firebase.auth.FirebaseUser
 import com.example.chatpart.data.PersonChat
 import com.example.chatpart.data.ChatHistoryManager
 import com.example.chatpart.data.ChatMessageData
 import com.example.chatpart.domain.Profile
+import com.example.chatpart.domain.Result
 import com.example.chatpart.i18n.LocalizedString
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
 import kotlinx.coroutines.launch
+import java.io.File
 
 // ─── Data Models ────────────────────────────────────────────────────────────
 
@@ -78,14 +81,16 @@ data class ChatbotAvatar(
     val color: Color,
     val greeting: String,
     val isCustomCharacter: Boolean = false,
-    val profileId: String? = null
+    val profileId: String? = null,
+    val voiceId: String? = null    // MiniMax voice_id, null = use default preset
 )
 
 data class ChatMessage(
     val text: String,
     val isFromUser: Boolean,
     val isVoice: Boolean = false,
-    val voiceDurationSec: Int = 0
+    val voiceDurationSec: Int = 0,
+    val voiceFilePath: String? = null   // absolute path to WAV file for STT replay
 )
 
 // Default AI Chatbots - only 3 (use getDefaultChatbots() composable function)
@@ -159,7 +164,8 @@ fun ChatScreen(
                 color = com.example.chatpart.Lavender,
                 greeting = "Hi! I'm ${profile.name}, ${profile.relationship}! 👋",
                 isCustomCharacter = true,
-                profileId = profile.id
+                profileId = profile.id,
+                voiceId = profile.voiceId  // 携带克隆的声音 ID
             )
         }
         defaultChatbotsList + customBots
@@ -168,6 +174,17 @@ fun ChatScreen(
     // Chatbot selection
     var selectedBot by remember { mutableStateOf(allChatbots.firstOrNull() ?: defaultChatbotsList[0]) }
     var showAvatarPicker by remember { mutableStateOf(false) }
+
+    // Helper function to resolve the correct Profile for the selected bot
+    fun resolveProfile(): Profile? {
+        return if (selectedBot.isCustomCharacter && selectedBot.profileId != null) {
+            // From customCharacters list find the matching Profile
+            customCharacters.find { it.id == selectedBot.profileId }
+        } else {
+            // Default bots (assistant/teacher/coding) use the passed currentProfile
+            currentProfile
+        }
+    }
 
     // Navigate to specific bot when coming from History screen
     LaunchedEffect(targetBotId) {
@@ -228,7 +245,6 @@ fun ChatScreen(
 
     // Voice recording
     val audioManager = remember { AudioRecordManager(context) }
-    val voiceApi: VoiceApiService = remember { MockVoiceApiService() }
 
     // Vibrator for haptic feedback
     val vibrator = remember {
@@ -251,10 +267,11 @@ fun ChatScreen(
         }
     }
 
-    // Text-to-Speech engine
-    val tts = remember { TextToSpeech(context) { } }
+    // MiniMax Audio Client for TTS
+    val audioClient = remember { MiniMaxAudioClient(context) }
+    val mediaPlayer = remember { MediaPlayer() }
     DisposableEffect(Unit) {
-        onDispose { tts.shutdown() }
+        onDispose { mediaPlayer.release() }
     }
 
     // Permission
@@ -343,8 +360,47 @@ fun ChatScreen(
                     currentUser = currentUser,
                     botAvatar = selectedBot,
                     isDarkMode = isDarkMode,
-                    onTts = { text -> tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, null) },
-                    onStt = { /* TODO: connect STT API here — receives the ChatMessage */ _ -> }
+                    onTts = { text ->
+                        scope.launch {
+                            var tempFile: File? = null
+                            try {
+                                val boost = when (currentLanguage) {
+                                    "zh" -> "Chinese"
+                                    "fr" -> "French"
+                                    else -> ""
+                                }
+                                val filePath = audioClient.textToVoice(
+                                    text = text,
+                                    voiceId = selectedBot.voiceId ?: resolveProfile()?.voiceId ?: "",
+                                    emotion = "calm",
+                                    languageBoost = boost
+                                )
+                                tempFile = File(filePath)
+                                mediaPlayer.reset()
+                                mediaPlayer.setDataSource(filePath)
+                                mediaPlayer.prepare()
+                                mediaPlayer.setOnCompletionListener {
+                                    mediaPlayer.reset()
+                                    tempFile?.delete()  // Clean up cache after playback
+                                }
+                                mediaPlayer.start()
+                            } catch (e: Exception) {
+                                Log.e("MiniMaxTTS", "TTS failed: ${e.message}")
+                                tempFile?.delete()  // Clean up on error too
+                            }
+                        }
+                    },
+                    onStt = { voiceMessage ->
+                        // STT now uses Android SpeechRecognizer to directly capture microphone input
+                        // The voiceMessage.voiceFilePath is ignored since we're using live recording
+                        scope.launch {
+                            audioClient.voiceToText { text ->
+                                if (text.isNotBlank()) {
+                                    inputText = text   // fills the text input with the transcription result
+                                }
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -410,24 +466,65 @@ fun ChatScreen(
                                         text = "🎤 Voice message",
                                         isFromUser = true,
                                         isVoice = true,
-                                        voiceDurationSec = (audioFile.length() / (16000 * 2)).toInt().coerceAtLeast(1)
+                                        voiceDurationSec = (audioFile.length() / (16000 * 2)).toInt().coerceAtLeast(1),
+                                        voiceFilePath = audioFile.absolutePath
                                     )
 
-                                    // Send to voice API
+                                    // Real STT → LLM → TTS pipeline
                                     scope.launch {
-                                        val result = voiceApi.sendVoiceMessage(audioFile, selectedBot.id)
-                                        result.onSuccess { response ->
-                                            messages = messages + ChatMessage(
-                                                text = response.text,
-                                                isFromUser = false
-                                            )
+                                        isLoading = true
+                                        try {
+                                            // Step 1: STT - let user speak again (SpeechRecognizer doesn't replay recorded audio)
+                                            val textDeferred = CompletableDeferred<String>()
+                                            audioClient.voiceToText { text ->
+                                                textDeferred.complete(text)
+                                            }
+                                            val transcribedText = textDeferred.await()
+
+                                            if (transcribedText.isBlank()) {
+                                                messages = messages + ChatMessage("(Speech not recognized)", isFromUser = false)
+                                                isLoading = false
+                                                return@launch
+                                            }
+
+                                            // Step 2: LLM - send to AI
+                                            val profile = resolveProfile()
+                                            val result = if (personChat != null && profile != null) {
+                                                personChat.sendMessage(p = profile, history = chatHistory, userText = transcribedText)
+                                            } else {
+                                                null
+                                            }
+
+                                            val replyText = result?.replyText ?: "I received your voice message!"
+                                            messages = messages + ChatMessage(replyText, isFromUser = false)
+                                            chatHistory = chatHistory + Message(Role.USER, transcribedText) + Message(Role.ASSISTANT, replyText)
+
+                                            // Step 3: TTS - auto-play AI reply
+                                            val boost = when (currentLanguage) { "zh" -> "Chinese"; "fr" -> "French"; else -> "" }
+                                            var tempFile: File? = null
+                                            try {
+                                                val filePath = audioClient.textToVoice(
+                                                    text = replyText,
+                                                    voiceId = selectedBot.voiceId ?: resolveProfile()?.voiceId ?: "",
+                                                    emotion = result?.emotion ?: "calm",
+                                                    languageBoost = boost
+                                                )
+                                                tempFile = File(filePath)
+                                                mediaPlayer.reset()
+                                                mediaPlayer.setDataSource(filePath)
+                                                mediaPlayer.prepare()
+                                                mediaPlayer.setOnCompletionListener { mediaPlayer.reset(); tempFile?.delete() }
+                                                mediaPlayer.start()
+                                            } catch (e: Exception) {
+                                                Log.e("MiniMaxTTS", "Auto-TTS failed: ${e.message}")
+                                                tempFile?.delete()
+                                            }
+
+                                        } catch (e: Exception) {
+                                            Log.e("ChatScreen", "Voice flow error: ${e.message}")
+                                            messages = messages + ChatMessage("Sorry, I encountered an error.", isFromUser = false)
                                         }
-                                        result.onFailure {
-                                            messages = messages + ChatMessage(
-                                                text = "Sorry, I couldn't process your voice message.",
-                                                isFromUser = false
-                                            )
-                                        }
+                                        isLoading = false
                                     }
                                 }
                             }
@@ -476,11 +573,12 @@ fun ChatScreen(
                                     chatHistory = chatHistory + Message(Role.USER, userMsg)
 
                                     // Use real AI if personChat and profile are available
-                                    if (personChat != null && currentProfile != null) {
+                                    val profile = resolveProfile()
+                                    if (personChat != null && profile != null) {
                                         scope.launch {
                                             try {
                                                 val result = personChat.sendMessage(
-                                                    p = currentProfile,
+                                                    p = profile,
                                                     history = chatHistory,
                                                     userText = userMsg
                                                 )
