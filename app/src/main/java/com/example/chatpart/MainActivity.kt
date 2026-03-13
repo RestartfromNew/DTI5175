@@ -51,6 +51,7 @@ import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.ui.theme.ChatPartTheme
+import com.example.chatpart.screens.EmailLoginScreen
 import com.example.chatpart.ui.theme.Peach
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -66,6 +67,7 @@ import com.example.chatpart.data.PersonChat
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
+import com.example.chatpart.screens.RegisterScreen
 import java.util.UUID
 
 data class TabItem(
@@ -112,6 +114,8 @@ class MainActivity : ComponentActivity() {
         const val PAGE_CHARACTER_DETAIL = 9
         const val PAGE_LANGUAGE_SELECT = 10
         const val PAGE_VOICE_CLONE = 11
+        const val PAGE_EMAIL_LOGIN = 12
+        const val PAGE_REGISTER = 13
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -189,15 +193,34 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     PAGE_LOGIN -> {
-                        // 首次使用登录后跳转新引导流程
                         LoginScreen(
                             authManager = authManager,
+
                             onSignInSuccess = {
                                 currentUser = authManager.currentUser
                                 Log.d("Firebase", "✅ User signed in: ${currentUser?.displayName}")
-                                // 登录后跳转到语言选择
                                 currentPage = PAGE_LANGUAGE_SELECT
+                            },
+
+                            onEmailSignInClick = {
+                                currentPage = PAGE_EMAIL_LOGIN
+                            },
+                            onRegisterClick = {
+                                currentPage = PAGE_REGISTER
                             }
+                        )
+                    }
+                    PAGE_REGISTER -> {
+                        RegisterScreen(
+
+                            onBack = {
+                                currentPage = PAGE_LOGIN
+                            },
+
+                            onRegisterSuccess = {
+                                currentPage = PAGE_LOGIN
+                            }
+
                         )
                     }
                     PAGE_CHARACTER_LIST -> {
@@ -373,6 +396,17 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    PAGE_EMAIL_LOGIN -> {
+                        EmailLoginScreen(
+                            onBack = {
+                                currentPage = PAGE_LOGIN
+                            },
+                            onLoginSuccess = {
+                                currentPage = PAGE_MAIN
+                            }
+
+                        )
+                    }
                     else -> {
                         // Main page with tab navigation
                         MainTabScreen(
@@ -396,6 +430,8 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+
+
                 }
             }
         }

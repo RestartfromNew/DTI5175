@@ -9,6 +9,7 @@ import androidx.credentials.GetCredentialRequest
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.NoCredentialException
+import com.example.chatpart.network.APIService
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
@@ -32,6 +33,11 @@ class GoogleAuthManager(private val context: Context) {
 
     val isSignedIn: Boolean
         get() = auth.currentUser != null
+
+    data class GoogleLoginResult(
+        val user: FirebaseUser,
+        val idToken: String
+    )
 
     /**
      * Sign in using the "Sign in with Google" button flow.
@@ -85,8 +91,13 @@ class GoogleAuthManager(private val context: Context) {
                         val user = authResult.user
 
                         if (user != null) {
+                            val tokenResult = user.getIdToken(true).await()
+                            val idToken = tokenResult.token
                             Log.d(TAG, "✅ Sign-in successful: ${user.displayName} (${user.email})")
                             Log.d(TAG, "✅ Avatar URL: ${user.photoUrl}")
+                            if (idToken != null) {
+                                APIService.googleLogin(this.context, idToken)
+                            }
                             Result.success(user)
                         } else {
                             Result.failure(Exception("Sign-in returned null user"))

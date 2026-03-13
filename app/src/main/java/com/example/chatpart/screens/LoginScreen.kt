@@ -34,7 +34,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun LoginScreen(
     authManager: GoogleAuthManager,
-    onSignInSuccess: () -> Unit
+    onSignInSuccess: () -> Unit,
+    onEmailSignInClick: () -> Unit,
+    onRegisterClick: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     var isLoading by remember { mutableStateOf(false) }
@@ -195,7 +197,51 @@ fun LoginScreen(
                 }
 
                 Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = {
+                        onEmailSignInClick()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(60.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(16.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Text(
+                        "Sign in with Email",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = DarkText
+                    )
+                }
+                Spacer(Modifier.height(14.dp))
 
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Don't have an account?",
+                        fontSize = 14.sp,
+                        color = Color.Gray
+                    )
+
+                    TextButton(
+                        onClick = {
+                            onRegisterClick()
+                        }
+                    ) {
+                        Text(
+                            text = "Register",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Peach
+                        )
+                    }
+                }
                 Text(
                     "By signing in, you agree to our Terms of Service",
                     fontSize = 12.sp,

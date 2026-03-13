@@ -27,7 +27,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-val Peach = Color(0xFFFF9D85)
+val Peach = Color(0xFFFFA393)
 val Lavender = Color(0xB6A6FF)
 val AccentPink = Color(0xFFFF85A2)
 val SoftWhite = Color(0xFFFFF9F6)
