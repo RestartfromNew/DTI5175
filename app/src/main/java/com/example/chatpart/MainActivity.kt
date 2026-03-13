@@ -77,7 +77,8 @@ data class TabItem(
 class MainActivity : ComponentActivity() {
 
     // AI Components
-    private val llmClient = MiniMaxLlmClient()
+    // private val llmClient = MiniMaxLlmClient() 
+    private val llmClient = AITest()
     private val memoryStore = InMemoryStore()
     private val embeddingClient = EmbeddingLlm()
     private val personChat = PersonChat(llmClient, memoryStore, embeddingClient)
