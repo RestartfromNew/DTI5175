@@ -218,7 +218,7 @@ class MainActivity : ComponentActivity() {
                             },
 
                             onRegisterSuccess = {
-                                currentPage = PAGE_LOGIN
+                                currentPage = PAGE_LANGUAGE_SELECT
                             }
 
                         )
@@ -402,7 +402,7 @@ class MainActivity : ComponentActivity() {
                                 currentPage = PAGE_LOGIN
                             },
                             onLoginSuccess = {
-                                currentPage = PAGE_MAIN
+                                currentPage = PAGE_LANGUAGE_SELECT
                             }
 
                         )
