@@ -113,16 +113,15 @@ class CharacterStorage(private val context: Context) {
     fun deleteCharacter(id: String) {
         val characters = loadCharacters().toMutableList()
         characters.removeAll { it.id == id }
-        if (characters.isEmpty()) {
-            // Don't allow deleting all characters, add default
-            val default = getDefaultCharacters()
-            saveCharacters(default)
-            saveSelectedCharacterId(default.first().id)
-        } else {
-            saveCharacters(characters)
-            // If deleted character was selected, select first one
-            if (getSelectedCharacterId() == id) {
+        // Allow deleting all custom characters - users can still use the 3 default bots
+        saveCharacters(characters)
+        // If deleted character was selected, reset to the first remaining one (if any)
+        if (getSelectedCharacterId() == id) {
+            if (characters.isNotEmpty()) {
                 saveSelectedCharacterId(characters.first().id)
+            } else {
+                // If no custom characters left, clear the selection (will use default bot)
+                saveSelectedCharacterId("")
             }
         }
     }

@@ -39,6 +39,7 @@ fun SettingsScreen(
     currentLanguage: String = "en",
     onDarkModeChange: (Boolean) -> Unit = {},
     onNavigateToCharacters: () -> Unit = {},
+    onNavigateToVoices: () -> Unit = {},
     onSignOut: () -> Unit = {},
     onLanguageChange: (String) -> Unit = {}
 ) {
@@ -245,6 +246,14 @@ fun SettingsScreen(
                         title = t("MANAGE_CHARACTERS"),
                         subtitle = "Manage AI characters",
                         onClick = onNavigateToCharacters,
+                        isDarkMode = isDarkMode
+                    )
+                    SettingsNavItem(
+                        icon = Icons.Rounded.RecordVoiceOver,
+                        iconColor = Color(0xFF9C27B0),
+                        title = t("MANAGE_VOICES"),
+                        subtitle = "Manage cloned voices",
+                        onClick = onNavigateToVoices,
                         isDarkMode = isDarkMode
                     )
                     SettingsNavItem(

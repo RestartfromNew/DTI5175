@@ -21,6 +21,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,6 +48,7 @@ import com.example.chatpart.screens.CharacterBasicScreen
 import com.example.chatpart.screens.CharacterDetailScreen
 import com.example.chatpart.screens.LanguageSelectionScreen
 import com.example.chatpart.screens.VoiceCloneScreen
+import com.example.chatpart.screens.VoiceManagementScreen
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
@@ -66,6 +68,7 @@ import com.example.chatpart.data.PersonChat
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
+import com.example.chatpart.llm.AITest
 import java.util.UUID
 
 data class TabItem(
@@ -77,7 +80,7 @@ data class TabItem(
 class MainActivity : ComponentActivity() {
 
     // AI Components
-    // private val llmClient = MiniMaxLlmClient() 
+//     private val llmClient = MiniMaxLlmClient()
     private val llmClient = AITest()
     private val memoryStore = InMemoryStore()
     private val embeddingClient = EmbeddingLlm()
@@ -113,6 +116,7 @@ class MainActivity : ComponentActivity() {
         const val PAGE_CHARACTER_DETAIL = 9
         const val PAGE_LANGUAGE_SELECT = 10
         const val PAGE_VOICE_CLONE = 11
+        const val PAGE_VOICE_MANAGEMENT = 12
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -133,10 +137,39 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             var currentPage by remember { mutableIntStateOf(0) }
+            // Navigation stack to track page history for back navigation
+            var navigationStack by remember { mutableStateOf(listOf(0)) }
             var isDarkMode by remember { mutableStateOf(false) }
             val context = LocalContext.current
             val manager = remember { OnboardingManager(context) }
             val authManager = remember { GoogleAuthManager(context) }
+            val langManager = remember { LanguageManager(context) }
+            var currentLanguage by remember { mutableStateOf(langManager.getCurrentLanguage()) }
+
+            // Helper function to navigate to a new page and add to stack
+            fun navigateTo(page: Int) {
+                currentPage = page
+                navigationStack = navigationStack + page
+            }
+
+            // Helper function to go back to previous page
+            fun goBack(): Boolean {
+                return if (navigationStack.size > 1) {
+                    navigationStack = navigationStack.dropLast(1)
+                    currentPage = navigationStack.last()
+                    true
+                } else {
+                    false // Cannot go back further
+                }
+            }
+
+            // Handle system back gesture
+            BackHandler(enabled = true) {
+                if (!goBack()) {
+                    // If cannot go back, exit the app
+                    finish()
+                }
+            }
 
             // Character storage
             val characterStorage = remember { CharacterStorage(context) }
@@ -160,10 +193,10 @@ class MainActivity : ComponentActivity() {
                     PAGE_ONBOARDING_1 -> {
                         OnboardingScreen(
                             onSkip = {
-                                currentPage = if (authManager.isSignedIn) PAGE_MAIN else PAGE_LOGIN
+                                navigateTo(if (authManager.isSignedIn) PAGE_MAIN else PAGE_LOGIN)
                             },
                             onNext = {
-                                currentPage = PAGE_ONBOARDING_2
+                                navigateTo(PAGE_ONBOARDING_2)
                             }
                         )
                     }
@@ -173,18 +206,18 @@ class MainActivity : ComponentActivity() {
                                 // 新引导流程: Onboarding → 语言选择 → 性别选择 → 头像选择 → 基本资料 → 详细资料 → 主界面
                                 if (authManager.isSignedIn) {
                                     // 已登录用户直接进入语言选择
-                                    currentPage = PAGE_LANGUAGE_SELECT
+                                    navigateTo(PAGE_LANGUAGE_SELECT)
                                 } else {
                                     // 未登录用户先登录
-                                    currentPage = PAGE_LOGIN
+                                    navigateTo(PAGE_LOGIN)
                                 }
                             },
                             onNext = {
                                 // 新引导流程: Onboarding → 语言选择 → 性别选择 → 头像选择 → 基本资料 → 详细资料 → 主界面
                                 if (authManager.isSignedIn) {
-                                    currentPage = PAGE_LANGUAGE_SELECT
+                                    navigateTo(PAGE_LANGUAGE_SELECT)
                                 } else {
-                                    currentPage = PAGE_LOGIN
+                                    navigateTo(PAGE_LOGIN)
                                 }
                             }
                         )
@@ -197,7 +230,7 @@ class MainActivity : ComponentActivity() {
                                 currentUser = authManager.currentUser
                                 Log.d("Firebase", "✅ User signed in: ${currentUser?.displayName}")
                                 // 登录后跳转到语言选择
-                                currentPage = PAGE_LANGUAGE_SELECT
+                                navigateTo(PAGE_LANGUAGE_SELECT)
                             }
                         )
                     }
@@ -209,15 +242,15 @@ class MainActivity : ComponentActivity() {
                             onSelectCharacter = { profile ->
                                 characterStorage.saveSelectedCharacterId(profile.id)
                                 selectedCharacter = profile
-                                currentPage = PAGE_MAIN
+                                navigateTo(PAGE_MAIN)
                             },
                             onCreateNew = {
                                 editingCharacter = null
-                                currentPage = PAGE_CHARACTER_EDITOR
+                                navigateTo(PAGE_CHARACTER_EDITOR)
                             },
                             onEdit = { profile ->
                                 editingCharacter = profile
-                                currentPage = PAGE_CHARACTER_EDITOR
+                                navigateTo(PAGE_CHARACTER_EDITOR)
                             },
                             onDelete = { profile ->
                                 characterStorage.deleteCharacter(profile.id)
@@ -225,7 +258,7 @@ class MainActivity : ComponentActivity() {
                                 selectedCharacter = characterStorage.getSelectedCharacter() ?: defaultProfile
                             },
                             onBack = {
-                                currentPage = PAGE_MAIN
+                                navigateTo(PAGE_MAIN)
                             }
                         )
                     }
@@ -246,11 +279,11 @@ class MainActivity : ComponentActivity() {
                                     selectedCharacter = profile
                                 }
                                 // 创建完成后直接进入主界面
-                                currentPage = PAGE_MAIN
+                                navigateTo(PAGE_MAIN)
                             },
                             onCancel = {
                                 // 取消后返回角色列表或主界面
-                                currentPage = if (characters.isEmpty()) PAGE_ONBOARDING_2 else PAGE_CHARACTER_LIST
+                                navigateTo(if (characters.isEmpty()) PAGE_ONBOARDING_2 else PAGE_CHARACTER_LIST)
                             }
                         )
                     }
@@ -259,10 +292,10 @@ class MainActivity : ComponentActivity() {
                         LanguageSelectionScreen(
                             isDarkMode = isDarkMode,
                             onLanguageSelected = { langCode ->
-                                currentPage = PAGE_GENDER_SELECT
+                                navigateTo(PAGE_GENDER_SELECT)
                             },
                             onSkip = {
-                                currentPage = PAGE_GENDER_SELECT
+                                navigateTo(PAGE_GENDER_SELECT)
                             }
                         )
                     }
@@ -271,11 +304,11 @@ class MainActivity : ComponentActivity() {
                             isDarkMode = isDarkMode,
                             onGenderSelected = { gender ->
                                 onboardingGender = gender
-                                currentPage = PAGE_AVATAR_SELECT
+                                navigateTo(PAGE_AVATAR_SELECT)
                             },
                             onSkip = {
                                 // Skip to main (for editing existing character)
-                                currentPage = if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN
+                                navigateTo(if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN)
                             }
                         )
                     }
@@ -285,14 +318,14 @@ class MainActivity : ComponentActivity() {
                             selectedGender = onboardingGender ?: "其他",
                             onAvatarSelected = { avatar ->
                                 onboardingAvatar = avatar
-                                currentPage = PAGE_CHARACTER_BASIC
+                                navigateTo(PAGE_CHARACTER_BASIC)
                             },
                             onBack = {
-                                currentPage = PAGE_GENDER_SELECT
+                                navigateTo(PAGE_GENDER_SELECT)
                             },
                             onSkip = {
                                 // Skip to main
-                                currentPage = if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN
+                                navigateTo(if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN)
                             }
                         )
                     }
@@ -304,14 +337,14 @@ class MainActivity : ComponentActivity() {
                             onNext = { name, relationship ->
                                 onboardingName = name
                                 onboardingRelationship = relationship
-                                currentPage = PAGE_CHARACTER_DETAIL
+                                navigateTo(PAGE_CHARACTER_DETAIL)
                             },
                             onBack = {
-                                currentPage = PAGE_AVATAR_SELECT
+                                navigateTo(PAGE_AVATAR_SELECT)
                             },
                             onSkip = {
                                 // 如果没有填写信息就跳过，返回角色列表
-                                currentPage = PAGE_CHARACTER_LIST
+                                navigateTo(PAGE_CHARACTER_LIST)
                             }
                         )
                     }
@@ -331,15 +364,15 @@ class MainActivity : ComponentActivity() {
                             onSave = { profile ->
                                 // Go to voice clone screen
                                 pendingVoiceCloneProfile = profile
-                                currentPage = PAGE_VOICE_CLONE
+                                navigateTo(PAGE_VOICE_CLONE)
                             },
                             onBack = {
-                                currentPage = PAGE_CHARACTER_BASIC
+                                navigateTo(PAGE_CHARACTER_BASIC)
                             },
                             onSkip = {
                                 // Go to voice clone screen without additional details
                                 pendingVoiceCloneProfile = basicProfile
-                                currentPage = PAGE_VOICE_CLONE
+                                navigateTo(PAGE_VOICE_CLONE)
                             }
                         )
                     }
@@ -356,7 +389,7 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                currentPage = PAGE_MAIN
+                                navigateTo(PAGE_MAIN)
                             },
                             onSkip = {
                                 // Save profile without voice cloning
@@ -367,10 +400,35 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                currentPage = PAGE_MAIN
+                                navigateTo(PAGE_MAIN)
                             },
                             onBack = {
-                                currentPage = PAGE_CHARACTER_DETAIL
+                                navigateTo(PAGE_CHARACTER_DETAIL)
+                            }
+                        )
+                    }
+                    PAGE_VOICE_MANAGEMENT -> {
+                        VoiceManagementScreen(
+                            isDarkMode = isDarkMode,
+                            currentLanguage = currentLanguage,
+                            characterStorage = characterStorage,
+                            onNavigateToVoiceClone = {
+                                // Navigate to voice clone - create a temporary profile for cloning
+                                pendingVoiceCloneProfile = Profile(
+                                    id = "temp_voice_${System.currentTimeMillis()}",
+                                    name = "New Voice",
+                                    gender = "女",
+                                    relationship = "朋友",
+                                    background = ""
+                                )
+                                navigateTo(PAGE_VOICE_CLONE)
+                            },
+                            onBack = {
+                                navigateTo(PAGE_MAIN)
+                            },
+                            onVoicesChanged = {
+                                // Refresh characters list
+                                characters = characterStorage.loadCharacters()
                             }
                         )
                     }
@@ -384,17 +442,20 @@ class MainActivity : ComponentActivity() {
                             customCharacters = characters,
                             onDarkModeChange = { isDarkMode = it },
                             onNavigateToCharacters = {
-                                currentPage = PAGE_CHARACTER_LIST
+                                navigateTo(PAGE_CHARACTER_LIST)
                             },
                             onSignOut = {
                                 authManager.signOut()
                                 currentUser = null
-                                currentPage = PAGE_LOGIN
+                                navigateTo(PAGE_LOGIN)
                             },
                             onSelectCharacter = { profile ->
                                 characterStorage.saveSelectedCharacterId(profile.id)
                                 selectedCharacter = profile
-                            }
+                            },
+                            currentLanguage = currentLanguage,
+                            onLanguageChange = { code -> currentLanguage = code },
+                            onNavigateToVoices = { navigateTo(PAGE_VOICE_MANAGEMENT) }
                         )
                     }
                 }
@@ -412,12 +473,13 @@ fun MainTabScreen(
     customCharacters: List<Profile> = emptyList(),
     onDarkModeChange: (Boolean) -> Unit = {},
     onNavigateToCharacters: () -> Unit = {},
+    onNavigateToVoices: () -> Unit = {},
     onSignOut: () -> Unit = {},
-    onSelectCharacter: (Profile) -> Unit = {}
+    onSelectCharacter: (Profile) -> Unit = {},
+    currentLanguage: String = "zh",
+    onLanguageChange: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val langManager = remember { LanguageManager(context) }
-    var currentLanguage by remember { mutableStateOf(langManager.getCurrentLanguage()) }
 
     fun t(key: String) = Languages.getString(currentLanguage, key)
 
@@ -545,8 +607,9 @@ fun MainTabScreen(
                     currentLanguage = currentLanguage,
                     onDarkModeChange = onDarkModeChange,
                     onNavigateToCharacters = onNavigateToCharacters,
+                    onNavigateToVoices = onNavigateToVoices,
                     onSignOut = onSignOut,
-                    onLanguageChange = { code -> currentLanguage = code }
+                    onLanguageChange = onLanguageChange
                 )
             }
         }

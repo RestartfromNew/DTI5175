@@ -44,6 +44,17 @@ object EnglishStrings {
         "PRIVACY_POLICY" to "Privacy Policy",
         "ABOUT" to "About",
         "MANAGE_CHARACTERS" to "Manage Characters",
+        "MANAGE_VOICES" to "Manage Voices",
+        "VOICE_COUNT" to "{n} cloned voice(s)",
+        "NO_VOICES" to "No cloned voices yet",
+        "CLONE_FIRST_VOICE" to "Clone your first voice",
+        "VOICE_FOR" to "Voice for {name}",
+        "PLAY" to "Play",
+        "DELETE" to "Delete",
+        "CONFIRM_DELETE_VOICE" to "Delete this voice? This will also remove it from the character.",
+        "VOICE_DELETED" to "Voice deleted",
+        "VOICE_PLAYING" to "Playing...",
+        "VOICE_ERROR" to "Failed to play voice",
 
         // Character
         "CHARACTERS" to "Characters",
@@ -129,12 +140,19 @@ object EnglishStrings {
         "DEFAULT_TEACHER" to "Teacher",
         "DEFAULT_CODER" to "Coder",
         "CHOOSE_CHATBOT" to "Choose your chatbot",
+        "DELETE_CHARACTER" to "Delete Character",
+        "DELETE_CHARACTER_CONFIRM" to "Are you sure you want to delete \"{name}\"? This action cannot be undone.",
+        "DELETE" to "Delete",
+        "CANCEL" to "Cancel",
 
         // Settings sections
         "GENERAL" to "General",
         "AI_SETTINGS" to "AI Settings",
         "SELECT_LANGUAGE" to "Select Language",
-        "STT_CONVERT" to "Convert to text"
+        "STT_CONVERT" to "Convert to text",
+
+        // TTS
+        "TTS_PLAYING" to "Playing, please wait..."
     )
 }
 
@@ -182,6 +200,17 @@ object FrenchStrings {
         "PRIVACY_POLICY" to "Politique de confidentialité",
         "ABOUT" to "À propos",
         "MANAGE_CHARACTERS" to "Gérer les personnages",
+        "MANAGE_VOICES" to "Gérer les voix",
+        "VOICE_COUNT" to "{n} voix clonée(s)",
+        "NO_VOICES" to "Pas encore de voix clonées",
+        "CLONE_FIRST_VOICE" to "Cloner votre première voix",
+        "VOICE_FOR" to "Voix pour {name}",
+        "PLAY" to "Lecture",
+        "DELETE" to "Supprimer",
+        "CONFIRM_DELETE_VOICE" to "Supprimer cette voix ? Cela supprimera également la voix du personnage.",
+        "VOICE_DELETED" to "Voix supprimée",
+        "VOICE_PLAYING" to "Lecture en cours...",
+        "VOICE_ERROR" to "Échec de la lecture",
 
         // Character
         "CHARACTERS" to "Personnages",
@@ -267,12 +296,19 @@ object FrenchStrings {
         "DEFAULT_TEACHER" to "Enseignant",
         "DEFAULT_CODER" to "Programmeur",
         "CHOOSE_CHATBOT" to "Choisissez votre chatbot",
+        "DELETE_CHARACTER" to "Supprimer le personnage",
+        "DELETE_CHARACTER_CONFIRM" to "Êtes-vous sûr de vouloir supprimer \"{name}\" ? Cette action est irréversible.",
+        "DELETE" to "Supprimer",
+        "CANCEL" to "Annuler",
 
         // Settings sections
         "GENERAL" to "Général",
         "AI_SETTINGS" to "Paramètres IA",
         "SELECT_LANGUAGE" to "Sélectionner la langue",
-        "STT_CONVERT" to "Convertir en texte"
+        "STT_CONVERT" to "Convertir en texte",
+
+        // TTS
+        "TTS_PLAYING" to "Lecture en cours, veuillez patienter..."
     )
 }
 
@@ -320,6 +356,17 @@ object ChineseStrings {
         "PRIVACY_POLICY" to "隐私政策",
         "ABOUT" to "关于",
         "MANAGE_CHARACTERS" to "管理角色",
+        "MANAGE_VOICES" to "管理声音",
+        "VOICE_COUNT" to "{n} 个克隆声音",
+        "NO_VOICES" to "暂无克隆声音",
+        "CLONE_FIRST_VOICE" to "克隆你的第一个声音",
+        "VOICE_FOR" to "{name} 的声音",
+        "PLAY" to "播放",
+        "DELETE" to "删除",
+        "CONFIRM_DELETE_VOICE" to "确定删除此声音？这也会从角色中移除该声音。",
+        "VOICE_DELETED" to "声音已删除",
+        "VOICE_PLAYING" to "播放中...",
+        "VOICE_ERROR" to "播放失败",
 
         // Character
         "CHARACTERS" to "角色",
@@ -405,11 +452,18 @@ object ChineseStrings {
         "DEFAULT_TEACHER" to "老师",
         "DEFAULT_CODER" to "程序员",
         "CHOOSE_CHATBOT" to "选择你的AI助手",
+        "DELETE_CHARACTER" to "删除角色",
+        "DELETE_CHARACTER_CONFIRM" to "确定要删除 \"{name}\" 吗？此操作无法撤销。",
+        "DELETE" to "删除",
+        "CANCEL" to "取消",
 
         // Settings sections
         "GENERAL" to "常规",
         "AI_SETTINGS" to "AI 设置",
         "SELECT_LANGUAGE" to "选择语言",
-        "STT_CONVERT" to "转换为文字"
+        "STT_CONVERT" to "转换为文字",
+
+        // TTS
+        "TTS_PLAYING" to "播放中，请稍候..."
     )
 }

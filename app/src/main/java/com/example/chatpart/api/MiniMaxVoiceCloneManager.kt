@@ -14,6 +14,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 /**
@@ -143,6 +144,8 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
     /**
      * Builds a valid MiniMax voice_id from a character ID.
      *
+     * Ensures uniqueness by appending a UUID suffix to avoid duplicates.
+     *
      * Constraints:
      * - Length: 8–256 characters
      * - Must start with an English letter
@@ -150,13 +153,16 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
      * - Cannot end with - or _
      * - Must be globally unique in your MiniMax account
      *
-     * Example: characterId="char_001" → "cpchar0010000"
+     * Example: characterId="Alex" → "cpAlex_a1b2c3d4"
      */
     fun buildVoiceId(characterId: String): String {
         val sanitized = characterId
             .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
-            .take(30)
-        val base = "cp$sanitized"
-        return base.padEnd(8, '0')
+            .take(15)
+        val uniqueSuffix = UUID.randomUUID().toString()
+            .replace("-", "")
+            .take(8)
+            .lowercase()
+        return "cp${sanitized}_$uniqueSuffix"
     }
 }

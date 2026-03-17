@@ -9,6 +9,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.util.Log
+import android.widget.Toast
 import com.example.chatpart.api.MiniMaxAudioClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -270,6 +271,7 @@ fun ChatScreen(
     // MiniMax Audio Client for TTS
     val audioClient = remember { MiniMaxAudioClient(context) }
     val mediaPlayer = remember { MediaPlayer() }
+    var isTtsPlaying by remember { mutableStateOf(false) }
     DisposableEffect(Unit) {
         onDispose { mediaPlayer.release() }
     }
@@ -361,9 +363,15 @@ fun ChatScreen(
                     botAvatar = selectedBot,
                     isDarkMode = isDarkMode,
                     onTts = { text ->
+                        // Check if TTS is already playing
+                        if (isTtsPlaying) {
+                            Toast.makeText(context, Languages.getString(currentLanguage, "TTS_PLAYING"), Toast.LENGTH_SHORT).show()
+                            return@ChatBubble
+                        }
                         scope.launch {
                             var tempFile: File? = null
                             try {
+                                isTtsPlaying = true
                                 val boost = when (currentLanguage) {
                                     "zh" -> "Chinese"
                                     "fr" -> "French"
@@ -380,12 +388,14 @@ fun ChatScreen(
                                 mediaPlayer.setDataSource(filePath)
                                 mediaPlayer.prepare()
                                 mediaPlayer.setOnCompletionListener {
+                                    isTtsPlaying = false
                                     mediaPlayer.reset()
                                     tempFile?.delete()  // Clean up cache after playback
                                 }
                                 mediaPlayer.start()
                             } catch (e: Exception) {
                                 Log.e("MiniMaxTTS", "TTS failed: ${e.message}")
+                                isTtsPlaying = false
                                 tempFile?.delete()  // Clean up on error too
                             }
                         }
@@ -503,20 +513,30 @@ fun ChatScreen(
                                             val boost = when (currentLanguage) { "zh" -> "Chinese"; "fr" -> "French"; else -> "" }
                                             var tempFile: File? = null
                                             try {
-                                                val filePath = audioClient.textToVoice(
-                                                    text = replyText,
-                                                    voiceId = selectedBot.voiceId ?: resolveProfile()?.voiceId ?: "",
-                                                    emotion = result?.emotion ?: "calm",
-                                                    languageBoost = boost
-                                                )
-                                                tempFile = File(filePath)
-                                                mediaPlayer.reset()
-                                                mediaPlayer.setDataSource(filePath)
-                                                mediaPlayer.prepare()
-                                                mediaPlayer.setOnCompletionListener { mediaPlayer.reset(); tempFile?.delete() }
-                                                mediaPlayer.start()
+                                                if (isTtsPlaying) {
+                                                    // Skip auto-play if already playing
+                                                } else {
+                                                    isTtsPlaying = true
+                                                    val filePath = audioClient.textToVoice(
+                                                        text = replyText,
+                                                        voiceId = selectedBot.voiceId ?: resolveProfile()?.voiceId ?: "",
+                                                        emotion = result?.emotion ?: "calm",
+                                                        languageBoost = boost
+                                                    )
+                                                    tempFile = File(filePath)
+                                                    mediaPlayer.reset()
+                                                    mediaPlayer.setDataSource(filePath)
+                                                    mediaPlayer.prepare()
+                                                    mediaPlayer.setOnCompletionListener {
+                                                        isTtsPlaying = false
+                                                        mediaPlayer.reset()
+                                                        tempFile?.delete()
+                                                    }
+                                                    mediaPlayer.start()
+                                                }
                                             } catch (e: Exception) {
                                                 Log.e("MiniMaxTTS", "Auto-TTS failed: ${e.message}")
+                                                isTtsPlaying = false
                                                 tempFile?.delete()
                                             }
 
@@ -642,7 +662,8 @@ fun ChatScreen(
 fun AvatarPickerBar(
     chatbots: List<ChatbotAvatar>,
     selectedBot: ChatbotAvatar,
-    onSelect: (ChatbotAvatar) -> Unit
+    onSelect: (ChatbotAvatar) -> Unit,
+    onDelete: ((ChatbotAvatar) -> Unit)? = null
 ) {
     val context = LocalContext.current
 
@@ -670,7 +691,10 @@ fun AvatarPickerBar(
                         bot = bot,
                         isSelected = isSelected,
                         context = context,
-                        onClick = { onSelect(bot) }
+                        onClick = { onSelect(bot) },
+                        onDelete = if (bot.isCustomCharacter && onDelete != null) {
+                            { onDelete(bot) }
+                        } else null
                     )
                 }
             }
@@ -683,63 +707,83 @@ private fun AvatarPickerItem(
     bot: ChatbotAvatar,
     isSelected: Boolean,
     context: android.content.Context,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onDelete: (() -> Unit)? = null
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = if (isSelected) bot.color.copy(alpha = 0.12f) else Color(0xFFF5F5F5),
-        border = if (isSelected) {
-            androidx.compose.foundation.BorderStroke(2.dp, bot.color)
-        } else null,
-        modifier = Modifier
-            .clickable { onClick() }
-            .width(80.dp)
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
+    Box {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = if (isSelected) bot.color.copy(alpha = 0.12f) else Color(0xFFF5F5F5),
+            border = if (isSelected) {
+                androidx.compose.foundation.BorderStroke(2.dp, bot.color)
+            } else null,
+            modifier = Modifier
+                .clickable { onClick() }
+                .width(80.dp)
         ) {
-            // Check if it's a custom avatar (file path) or emoji
-            val isEmoji = !bot.emoji.startsWith("/") &&
-                          !bot.emoji.contains("avatar_") &&
-                          !bot.emoji.contains(".jpg") &&
-                          !bot.emoji.contains(".png") &&
-                          !bot.emoji.contains(".webp") &&
-                          bot.emoji.all {
-                              val c = it.code
-                              c in 0x2600..0x27BF ||  // Misc Symbols, Dingbats
-                              c in 0xD800..0xDFFF ||  // Surrogate pairs (emoji > U+FFFF)
-                              c == 0x200D ||           // ZWJ (Zero Width Joiner, e.g. 👩‍🏫)
-                              c == 0xFE0F ||           // Variation Selector-16
-                              c == 0x20E3              // Combining Enclosing Keycap
-                          }
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(vertical = 10.dp, horizontal = 4.dp)
+            ) {
+                // Check if it's a custom avatar (file path) or emoji
+                val isEmoji = !bot.emoji.startsWith("/") &&
+                              !bot.emoji.contains("avatar_") &&
+                              !bot.emoji.contains(".jpg") &&
+                              !bot.emoji.contains(".png") &&
+                              !bot.emoji.contains(".webp") &&
+                              bot.emoji.all {
+                                  val c = it.code
+                                  c in 0x2600..0x27BF ||  // Misc Symbols, Dingbats
+                                  c in 0xD800..0xDFFF ||  // Surrogate pairs (emoji > U+FFFF)
+                                  c == 0x200D ||           // ZWJ (Zero Width Joiner, e.g. 👩‍🏫)
+                                  c == 0xFE0F ||           // Variation Selector-16
+                                  c == 0x20E3              // Combining Enclosing Keycap
+                              }
 
-            if (isEmoji) {
-                // Emoji avatar
-                Text(bot.emoji, fontSize = 28.sp)
-            } else {
-                // Custom image avatar
-                AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(bot.emoji)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = bot.name,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
+                if (isEmoji) {
+                    // Emoji avatar
+                    Text(bot.emoji, fontSize = 28.sp)
+                } else {
+                    // Custom image avatar
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(bot.emoji)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = bot.name,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    bot.name,
+                    fontSize = 12.sp,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) bot.color else DarkText,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                bot.name,
-                fontSize = 12.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                color = if (isSelected) bot.color else DarkText,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+        }
+
+        // Delete button for custom characters
+        if (bot.isCustomCharacter && onDelete != null) {
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .size(20.dp)
+            ) {
+                Icon(
+                    Icons.Rounded.Close,
+                    contentDescription = "Delete",
+                    tint = Color.Red,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
         }
     }
 }
