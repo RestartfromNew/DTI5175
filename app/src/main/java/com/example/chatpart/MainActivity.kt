@@ -117,6 +117,13 @@ class MainActivity : ComponentActivity() {
         const val PAGE_LANGUAGE_SELECT = 10
         const val PAGE_VOICE_CLONE = 11
         const val PAGE_VOICE_MANAGEMENT = 12
+
+        // Onboarding pages set (for filtering in goBack)
+        val ONBOARDING_PAGES = setOf(
+            PAGE_ONBOARDING_1, PAGE_ONBOARDING_2, PAGE_LOGIN,
+            PAGE_LANGUAGE_SELECT, PAGE_GENDER_SELECT,
+            PAGE_AVATAR_SELECT, PAGE_CHARACTER_BASIC, PAGE_CHARACTER_DETAIL
+        )
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -136,9 +143,6 @@ class MainActivity : ComponentActivity() {
 
         enableEdgeToEdge()
         setContent {
-            var currentPage by remember { mutableIntStateOf(0) }
-            // Navigation stack to track page history for back navigation
-            var navigationStack by remember { mutableStateOf(listOf(0)) }
             var isDarkMode by remember { mutableStateOf(false) }
             val context = LocalContext.current
             val manager = remember { OnboardingManager(context) }
@@ -146,20 +150,53 @@ class MainActivity : ComponentActivity() {
             val langManager = remember { LanguageManager(context) }
             var currentLanguage by remember { mutableStateOf(langManager.getCurrentLanguage()) }
 
+            // Calculate start page based on onboarding status (FIX for problem A)
+            val startPage = when {
+                manager.isCompleted() && authManager.isSignedIn -> PAGE_MAIN
+                manager.isCompleted() -> PAGE_LOGIN
+                else -> PAGE_ONBOARDING_1
+            }
+
+            var currentPage by remember { mutableIntStateOf(startPage) }
+            // Navigation stack to track page history for back navigation
+            var navigationStack by remember { mutableStateOf(listOf(startPage)) }
+
+            // Flag to track if VoiceClone is entered from onboarding flow
+            var voiceCloneFromOnboarding by remember { mutableStateOf(false) }
+
             // Helper function to navigate to a new page and add to stack
             fun navigateTo(page: Int) {
                 currentPage = page
                 navigationStack = navigationStack + page
             }
 
-            // Helper function to go back to previous page
+            // Complete onboarding and go to main - reset navigation stack (FIX for problem B)
+            fun completeOnboardingAndGoToMain() {
+                manager.setCompleted()  // Mark onboarding as completed
+                currentPage = PAGE_MAIN
+                navigationStack = listOf(PAGE_MAIN)  // Clear all onboarding history
+            }
+
+            // Helper function to go back to previous page - filter out onboarding pages
             fun goBack(): Boolean {
-                return if (navigationStack.size > 1) {
-                    navigationStack = navigationStack.dropLast(1)
-                    currentPage = navigationStack.last()
-                    true
+                if (navigationStack.size <= 1) return false
+
+                // Pop current page
+                val newStack = navigationStack.dropLast(1)
+
+                // Filter out onboarding pages if onboarding is completed
+                val filteredStack = if (manager.isCompleted()) {
+                    newStack.dropLastWhile { it in ONBOARDING_PAGES }
                 } else {
-                    false // Cannot go back further
+                    newStack
+                }
+
+                return if (filteredStack.isEmpty()) {
+                    false // Let finish() handle it
+                } else {
+                    navigationStack = filteredStack
+                    currentPage = filteredStack.last()
+                    true
                 }
             }
 
@@ -193,7 +230,12 @@ class MainActivity : ComponentActivity() {
                     PAGE_ONBOARDING_1 -> {
                         OnboardingScreen(
                             onSkip = {
-                                navigateTo(if (authManager.isSignedIn) PAGE_MAIN else PAGE_LOGIN)
+                                if (authManager.isSignedIn) {
+                                    // Skip onboarding and go directly to main - mark as completed
+                                    completeOnboardingAndGoToMain()
+                                } else {
+                                    navigateTo(PAGE_LOGIN)
+                                }
                             },
                             onNext = {
                                 navigateTo(PAGE_ONBOARDING_2)
@@ -362,16 +404,18 @@ class MainActivity : ComponentActivity() {
                             isDarkMode = isDarkMode,
                             basicProfile = basicProfile,
                             onSave = { profile ->
-                                // Go to voice clone screen
+                                // Go to voice clone screen - mark as from onboarding
                                 pendingVoiceCloneProfile = profile
+                                voiceCloneFromOnboarding = true
                                 navigateTo(PAGE_VOICE_CLONE)
                             },
                             onBack = {
                                 navigateTo(PAGE_CHARACTER_BASIC)
                             },
                             onSkip = {
-                                // Go to voice clone screen without additional details
+                                // Go to voice clone screen without additional details - mark as from onboarding
                                 pendingVoiceCloneProfile = basicProfile
+                                voiceCloneFromOnboarding = true
                                 navigateTo(PAGE_VOICE_CLONE)
                             }
                         )
@@ -389,7 +433,12 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                navigateTo(PAGE_MAIN)
+                                // Use different navigation based on entry point
+                                if (voiceCloneFromOnboarding) {
+                                    completeOnboardingAndGoToMain()
+                                } else {
+                                    goBack() // Return to VoiceManagement
+                                }
                             },
                             onSkip = {
                                 // Save profile without voice cloning
@@ -400,10 +449,15 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                navigateTo(PAGE_MAIN)
+                                // Use different navigation based on entry point
+                                if (voiceCloneFromOnboarding) {
+                                    completeOnboardingAndGoToMain()
+                                } else {
+                                    goBack() // Return to VoiceManagement
+                                }
                             },
                             onBack = {
-                                navigateTo(PAGE_CHARACTER_DETAIL)
+                                goBack() // Can always go back regardless of entry point
                             }
                         )
                     }
@@ -413,7 +467,7 @@ class MainActivity : ComponentActivity() {
                             currentLanguage = currentLanguage,
                             characterStorage = characterStorage,
                             onNavigateToVoiceClone = {
-                                // Navigate to voice clone - create a temporary profile for cloning
+                                // Navigate to voice clone - mark as NOT from onboarding (from settings)
                                 pendingVoiceCloneProfile = Profile(
                                     id = "temp_voice_${System.currentTimeMillis()}",
                                     name = "New Voice",
@@ -421,6 +475,7 @@ class MainActivity : ComponentActivity() {
                                     relationship = "朋友",
                                     background = ""
                                 )
+                                voiceCloneFromOnboarding = false
                                 navigateTo(PAGE_VOICE_CLONE)
                             },
                             onBack = {
