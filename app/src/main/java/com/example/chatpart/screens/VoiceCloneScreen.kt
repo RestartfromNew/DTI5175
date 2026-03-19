@@ -384,7 +384,14 @@ fun VoiceCloneScreen(
                                     onVoiceCloned(voiceId)
                                 }.onFailure { error ->
                                     Log.e("VoiceClone", "Clone failed: ${error.message}")
-                                    cloneError = "Clone failed: ${error.message}"
+                                    val msg = error.message ?: "Unknown error"
+                                    cloneError = when {
+                                        msg.contains("2013") || msg.contains("sensitive") ->
+                                            "Audio rejected: Please record in Chinese or English only"
+                                        msg.contains("too short") ->
+                                            "Recording too short (min 10 seconds)"
+                                        else -> "Clone failed: $msg"
+                                    }
                                 }
                             } else {
                                 isCloning = false
