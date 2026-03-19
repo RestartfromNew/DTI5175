@@ -29,12 +29,16 @@ import androidx.compose.ui.unit.sp
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
 import com.example.chatpart.api.MiniMaxAudioClient
+import com.example.chatpart.api.MiniMaxVoiceCloneManager
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.data.DefaultVoice
 import com.example.chatpart.data.DefaultVoices
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
+import com.example.chatpart.voice.SlotUsageSummary
+import com.example.chatpart.voice.VoiceSlot
+import com.example.chatpart.voice.VoiceSlotManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -75,12 +79,17 @@ fun VoiceManagementScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDeleteDialog by remember { mutableStateOf<Profile?>(null) }
 
+    // Voice Slot 状态 (新增)
+    var slotUsage by remember { mutableStateOf<SlotUsageSummary?>(null) }
+    val totalSlots = 1 // 默认 1 slot，可扩展
+
     // Audio player
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
     // MiniMax clients
     val audioClient = remember { MiniMaxAudioClient(context) }
-    val voiceCloneManager = remember { com.example.chatpart.api.MiniMaxVoiceCloneManager(context) }
+    val voiceCloneManager = remember { MiniMaxVoiceCloneManager(context) }
+    val voiceSlotManager = remember { VoiceSlotManager(context, voiceCloneManager) }
     val scope = rememberCoroutineScope()
 
     // Load local characters that have a voiceId
@@ -106,9 +115,26 @@ fun VoiceManagementScreen(
         }
     }
 
+    // 加载 Voice Slot 使用情况 (新增)
+    fun loadSlotUsage() {
+        scope.launch {
+            try {
+                // TODO: 暂时使用 placeholder userIdentifier，后端提供 dbUserId 后替换
+                val userIdentifier = voiceSlotManager.getUserIdentifier(
+                    googleUserId = "placeholder_google",
+                    firebaseUid = "placeholder_firebase"
+                )
+                slotUsage = voiceSlotManager.getSlotUsage(userIdentifier, totalSlots)
+            } catch (e: Exception) {
+                Log.e("VoiceManagement", "Failed to load slot usage: ${e.message}")
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         loadCharacters()
         syncFromApi()
+        loadSlotUsage()
     }
 
     // Clean up MediaPlayer on dispose
@@ -167,12 +193,39 @@ fun VoiceManagementScreen(
         }
     }
 
-    // Delete voice function
+    // Delete voice function (修改: 同时删除 MiniMax 服务器上的 voice)
     fun deleteVoice(profile: Profile) {
-        val updatedProfile = profile.copy(voiceId = null)
-        characterStorage.updateCharacter(updatedProfile)
-        loadCharacters()
-        onVoicesChanged()
+        scope.launch {
+            try {
+                // TODO: 暂时使用 placeholder userIdentifier，后端提供 dbUserId 后替换
+                val userIdentifier = voiceSlotManager.getUserIdentifier(
+                    googleUserId = "placeholder_google",
+                    firebaseUid = "placeholder_firebase"
+                )
+
+                // 如果 profile 有 voiceId，删除 MiniMax 服务器上的 voice
+                if (profile.voiceId != null) {
+                    voiceCloneManager.deleteMiniMaxVoice(profile.voiceId)
+                }
+
+                // 找到对应的 slot 并删除
+                val slots = voiceSlotManager.getUserSlots(userIdentifier)
+                val slot = slots.find { it.voiceId == profile.voiceId }
+                if (slot != null) {
+                    voiceSlotManager.deleteSlotVoice(slot.slotId, userIdentifier)
+                }
+
+                // 更新本地 character
+                val updatedProfile = profile.copy(voiceId = null)
+                characterStorage.updateCharacter(updatedProfile)
+                loadCharacters()
+                loadSlotUsage()
+                onVoicesChanged()
+            } catch (e: Exception) {
+                Log.e("VoiceManagement", "Delete voice failed: ${e.message}")
+                errorMessage = translate("DELETE_FAILED")
+            }
+        }
     }
 
     // Play default voice function (for preset voices)
@@ -320,6 +373,7 @@ fun VoiceManagementScreen(
                         ClonedVoicesTab(
                             charactersWithVoice = charactersWithVoice,
                             apiOnlyVoiceIds = apiOnlyVoiceIds,
+                            slotUsage = slotUsage,
                             playingVoiceId = playingVoiceId,
                             isLoading = isLoading,
                             isDarkMode = isDarkMode,
@@ -331,6 +385,7 @@ fun VoiceManagementScreen(
                                 deleteVoice(showDeleteDialog!!)
                                 showDeleteDialog = null
                             },
+                            onNavigateToVoiceClone = onNavigateToVoiceClone,
                             t = translate,
                             subtitleColor = subtitleColor,
                             surfaceColor = surfaceColor,
@@ -354,33 +409,6 @@ fun VoiceManagementScreen(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-
-            // Clone new voice button (only show in Cloned Voices tab)
-            if (selectedTab == 0) {
-                Button(
-                    onClick = onNavigateToVoiceClone,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Peach,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = translate("CLONE_FIRST_VOICE"),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
 
             // Error message
             if (errorMessage != null) {
@@ -548,6 +576,7 @@ private fun VoiceItem(
 private fun ClonedVoicesTab(
     charactersWithVoice: List<Profile>,
     apiOnlyVoiceIds: List<String>,
+    slotUsage: SlotUsageSummary?,
     playingVoiceId: String?,
     isLoading: Boolean,
     isDarkMode: Boolean,
@@ -556,27 +585,32 @@ private fun ClonedVoicesTab(
     showDeleteDialog: Profile?,
     onDismissDelete: () -> Unit,
     onConfirmDelete: () -> Unit,
+    onNavigateToVoiceClone: () -> Unit,
     t: (String) -> String,
     subtitleColor: Color,
     surfaceColor: Color,
     textColor: Color
 ) {
-    val totalCount = charactersWithVoice.size + apiOnlyVoiceIds.size
+    val usedSlots = slotUsage?.usedSlots ?: 0
+    val totalSlots = slotUsage?.totalSlots ?: 1
+    val isFull = usedSlots >= totalSlots
 
-    // Voice count subtitle
+    // MiniMax 服务器 X/Y 显示
     Text(
-        text = t("VOICE_COUNT").replace("{n}", totalCount.toString()),
-        fontSize = 14.sp,
+        text = "────────── · MiniMax 服务器 $usedSlots/$totalSlots · ──────────",
+        fontSize = 12.sp,
         color = subtitleColor,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
     )
 
-    if (totalCount == 0) {
-        // Empty state
+    if (usedSlots == 0 && apiOnlyVoiceIds.isEmpty()) {
+        // Empty state - 没有克隆的声音
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(200.dp),
+                .fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
             Column(
@@ -596,12 +630,38 @@ private fun ClonedVoicesTab(
                 )
             }
         }
+
+        // 克隆第一个声音按钮
+        Button(
+            onClick = onNavigateToVoiceClone,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(56.dp),
+            shape = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Peach,
+                contentColor = Color.White
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = t("CLONE_FIRST_VOICE"),
+                fontSize = 16.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     } else {
+        // 有声音时的列表
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Local characters with voiceId
+            // 本地角色关联的声音
             items(charactersWithVoice, key = { it.id }) { profile ->
                 VoiceItem(
                     profile = profile,
@@ -621,7 +681,7 @@ private fun ClonedVoicesTab(
                 item {
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "· MiniMax Server ·",
+                        text = "· MiniMax 服务器 ·",
                         fontSize = 12.sp,
                         color = subtitleColor,
                         modifier = Modifier
@@ -641,6 +701,68 @@ private fun ClonedVoicesTab(
                         textColor = textColor
                     )
                 }
+            }
+        }
+
+        // 满了时的提示和购买按钮
+        if (isFull) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Slot 已满提示
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color(0xFFFFF3E0),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "⚠️ 声音slot已满",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFFE65100)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // TODO: 购买 UI 预留 (暂不实现具体逻辑)
+                    Button(
+                        onClick = { /* 跳转购买页面 */ },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF9800),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(text = "💰 购买更多slot")
+                    }
+                }
+            }
+        } else {
+            // 克隆新声音按钮
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onNavigateToVoiceClone,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Peach,
+                    contentColor = Color.White
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = t("CLONE_FIRST_VOICE"),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }

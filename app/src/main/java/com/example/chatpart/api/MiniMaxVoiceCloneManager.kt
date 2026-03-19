@@ -2,6 +2,8 @@ package com.example.chatpart.api
 
 import android.content.Context
 import com.example.chatpart.BuildConfig
+import com.example.chatpart.voice.PlaceholderDbUserId
+import com.example.chatpart.voice.UserIdentifier
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import kotlinx.coroutines.Dispatchers
@@ -14,6 +16,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 import java.io.IOException
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -170,6 +173,93 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
                 element.asJsonObject?.get("voice_id")?.asString
             }
         }
+    }
+
+    // ========== Voice Slot 系统 - 用户隔离相关 ==========
+
+    /**
+     * 使用用户隔离的 voice_id 克隆声音 (Voice Slot 系统)
+     *
+     * voice_id 格式: cpuser_{userHash}_{slotIndex}_{timestamp}
+     * 后端提供 dbUserId 后改为: cpuser_{dbUserId}_{slotIndex}_{timestamp}
+     *
+     * @param audioFile 录音文件
+     * @param userIdentifier 用户标识
+     * @param slotIndex 槽位索引
+     * @return Result 包含 voice_id
+     */
+    suspend fun cloneVoice(
+        audioFile: File,
+        userIdentifier: UserIdentifier,
+        slotIndex: Int
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val fileId = uploadAudioFile(audioFile)
+            val voiceId = buildUserVoiceId(userIdentifier, slotIndex)
+            registerVoiceClone(fileId = fileId, voiceId = voiceId)
+            voiceId
+        }
+    }
+
+    /**
+     * 删除 MiniMax 服务器上的克隆声音
+     *
+     * @param voiceId 要删除的 voice_id
+     * @return Result<Unit>
+     */
+    suspend fun deleteMiniMaxVoice(voiceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = mapOf("voice_id" to voiceId)
+            val request = Request.Builder()
+                .url("${MiniMaxConfig.BASE_URL}/v1/voice_delete")
+                .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: throw IOException("Empty response from voice_delete")
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val statusCode = json.getAsJsonObject("base_resp")?.get("status_code")?.asInt ?: -1
+            if (statusCode != 0) {
+                throw IOException("Delete voice failed (code $statusCode): $body")
+            }
+        }
+    }
+
+    /**
+     * 构建用户隔离的 voice_id
+     *
+     * 格式: cpuser_{userHash}_{slotIndex}_{timestamp}
+     * 后端提供 dbUserId 后改为: cpuser_{dbUserId}_{slotIndex}_{timestamp}
+     *
+     * @param userIdentifier 用户标识
+     * @param slotIndex 槽位索引
+     * @return 用户隔离的 voice_id
+     */
+    fun buildUserVoiceId(
+        userIdentifier: UserIdentifier,
+        slotIndex: Int
+    ): String {
+        // TODO: 后端提供 dbUserId 后直接使用 userIdentifier.dbUserId
+        // 过渡期使用 userHash
+        val userPart = if (userIdentifier.dbUserId == PlaceholderDbUserId.PENDING) {
+            userIdentifier.userHash
+        } else {
+            userIdentifier.dbUserId
+        }
+
+        val timestamp = System.currentTimeMillis()
+
+        return "cpuser_${userPart}_${slotIndex}_${timestamp}"
+    }
+
+    /**
+     * 计算字符串的 SHA-256 哈希 (用于 userHash)
+     */
+    private fun String.hash256(): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val hash = digest.digest(this.toByteArray())
+        return hash.joinToString("") { "%02x".format(it) }
     }
 
     /**
