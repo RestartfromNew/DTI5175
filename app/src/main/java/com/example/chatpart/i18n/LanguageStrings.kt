@@ -152,7 +152,22 @@ object EnglishStrings {
         "STT_CONVERT" to "Convert to text",
 
         // TTS
-        "TTS_PLAYING" to "Playing, please wait..."
+        "TTS_PLAYING" to "Playing, please wait...",
+
+        // Voice Management Tabs
+        "CLONED_VOICES" to "My Voices",
+        "DEFAULT_VOICES" to "Default Voices",
+        "VOICE_MALE" to "Male",
+        "VOICE_FEMALE" to "Female",
+        "VOICE_PREVIEW" to "Preview",
+
+        // TTS Languages
+        "LANG_ENGLISH" to "English",
+        "LANG_CHINESE" to "Chinese",
+        "LANG_FRENCH" to "French",
+        "LANG_JAPANESE" to "日本語",
+        "LANG_KOREAN" to "한국어",
+        "LANG_SPANISH" to "Español"
     )
 }
 
@@ -308,7 +323,22 @@ object FrenchStrings {
         "STT_CONVERT" to "Convertir en texte",
 
         // TTS
-        "TTS_PLAYING" to "Lecture en cours, veuillez patienter..."
+        "TTS_PLAYING" to "Lecture en cours, veuillez patienter...",
+
+        // Voice Management Tabs
+        "CLONED_VOICES" to "Mes voix",
+        "DEFAULT_VOICES" to "Voix par défaut",
+        "VOICE_MALE" to "Homme",
+        "VOICE_FEMALE" to "Femme",
+        "VOICE_PREVIEW" to "Aperçu",
+
+        // TTS Languages
+        "LANG_ENGLISH" to "Anglais",
+        "LANG_CHINESE" to "Chinois",
+        "LANG_FRENCH" to "Français",
+        "LANG_JAPANESE" to "日本語",
+        "LANG_KOREAN" to "한국어",
+        "LANG_SPANISH" to "Español"
     )
 }
 
@@ -464,6 +494,21 @@ object ChineseStrings {
         "STT_CONVERT" to "转换为文字",
 
         // TTS
-        "TTS_PLAYING" to "播放中，请稍候..."
+        "TTS_PLAYING" to "播放中，请稍候...",
+
+        // Voice Management Tabs
+        "CLONED_VOICES" to "我的声音",
+        "DEFAULT_VOICES" to "默认声音",
+        "VOICE_MALE" to "男声",
+        "VOICE_FEMALE" to "女声",
+        "VOICE_PREVIEW" to "预览",
+
+        // TTS Languages
+        "LANG_ENGLISH" to "英语",
+        "LANG_CHINESE" to "中文",
+        "LANG_FRENCH" to "法语",
+        "LANG_JAPANESE" to "日本語",
+        "LANG_KOREAN" to "한국어",
+        "LANG_SPANISH" to "Español"
     )
 }

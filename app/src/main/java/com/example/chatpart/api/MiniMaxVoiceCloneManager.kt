@@ -142,6 +142,37 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
     }
 
     /**
+     * Fetch all cloned voices from MiniMax API.
+     * Returns a list of voice_ids that exist on the server.
+     *
+     * ⚠️ A voice only appears here AFTER it has been used in at least one TTS call.
+     */
+    suspend fun fetchClonedVoices(): Result<List<String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = mapOf("voice_type" to "voice_cloning")
+            val request = Request.Builder()
+                .url("${MiniMaxConfig.BASE_URL}/v1/get_voice")
+                .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: throw IOException("Empty response from get_voice")
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val statusCode = json.getAsJsonObject("base_resp")?.get("status_code")?.asInt ?: -1
+            if (statusCode != 0) {
+                throw IOException("get_voice failed (code $statusCode): $body")
+            }
+
+            // Extract voice_ids from voice_cloning array
+            val voiceArray = json.getAsJsonArray("voice_cloning") ?: return@runCatching emptyList()
+            voiceArray.mapNotNull { element ->
+                element.asJsonObject?.get("voice_id")?.asString
+            }
+        }
+    }
+
+    /**
      * Builds a valid MiniMax voice_id from a character ID.
      *
      * Ensures uniqueness by appending a UUID suffix to avoid duplicates.
