@@ -15,6 +15,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -32,7 +33,10 @@ import com.example.chatpart.api.MiniMaxAudioClient
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.data.DefaultVoice
 import com.example.chatpart.data.DefaultVoices
+import com.example.chatpart.data.SlotStatus
 import com.example.chatpart.domain.Profile
+import com.example.chatpart.firestore.FirestoreError
+import com.example.chatpart.firestore.UserVoiceManager
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +48,7 @@ fun VoiceManagementScreen(
     isDarkMode: Boolean = false,
     currentLanguage: String = "en",
     characterStorage: CharacterStorage,
+    userVoiceManager: UserVoiceManager,
     onNavigateToVoiceClone: () -> Unit,
     onBack: () -> Unit,
     onVoicesChanged: () -> Unit = {}
@@ -70,10 +75,20 @@ fun VoiceManagementScreen(
     // API voices: voice_ids that exist on MiniMax server but may not be in local storage
     var apiOnlyVoiceIds by remember { mutableStateOf<List<String>>(emptyList()) }
     var isSyncing by remember { mutableStateOf(false) }
+    var syncError by remember { mutableStateOf<String?>(null) }
     var playingVoiceId by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDeleteDialog by remember { mutableStateOf<Profile?>(null) }
+    var showDeleteApiVoiceDialog by remember { mutableStateOf<String?>(null) }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+
+    // Snackbar state
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Slot status from Firestore
+    var slotStatus by remember { mutableStateOf<SlotStatus?>(null) }
+    var slotStatusError by remember { mutableStateOf<String?>(null) }
 
     // Audio player
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
@@ -92,15 +107,24 @@ fun VoiceManagementScreen(
     fun syncFromApi() {
         scope.launch {
             isSyncing = true
+            syncError = null
             voiceCloneManager.fetchClonedVoices()
                 .onSuccess { apiVoiceIds ->
                     val localVoiceIds = characterStorage.loadCharacters()
                         .mapNotNull { it.voiceId }.toSet()
                     // Only keep IDs that aren't already linked to a local character
                     apiOnlyVoiceIds = apiVoiceIds.filter { it !in localVoiceIds }
+                    syncError = null
                 }
                 .onFailure { e ->
                     Log.w("VoiceManagement", "API sync failed (offline?): ${e.message}")
+                    syncError = "Failed to sync from server"
+                    // Show snackbar with retry
+                    snackbarHostState.showSnackbar(
+                        message = "Sync failed: ${e.message ?: "Network error"}",
+                        actionLabel = "Retry",
+                        duration = SnackbarDuration.Long
+                    )
                 }
             isSyncing = false
         }
@@ -109,6 +133,16 @@ fun VoiceManagementScreen(
     LaunchedEffect(Unit) {
         loadCharacters()
         syncFromApi()
+        // Listen to slot status changes from Firestore
+        userVoiceManager.observeSlotStatus().collect { result ->
+            result.onSuccess { status ->
+                slotStatus = status
+                slotStatusError = null
+            }.onFailure { error ->
+                slotStatusError = userVoiceManager.getUserFriendlyErrorMessage(error)
+                Log.e("VoiceManagement", "Slot status error: ${error.message}")
+            }
+        }
     }
 
     // Clean up MediaPlayer on dispose
@@ -169,10 +203,92 @@ fun VoiceManagementScreen(
 
     // Delete voice function
     fun deleteVoice(profile: Profile) {
-        val updatedProfile = profile.copy(voiceId = null)
-        characterStorage.updateCharacter(updatedProfile)
-        loadCharacters()
-        onVoicesChanged()
+        scope.launch {
+            deleteError = null
+            profile.voiceId?.let { voiceId ->
+                userVoiceManager.deleteClonedVoice(voiceId)
+                    .onSuccess {
+                        // Also delete from MiniMax
+                        voiceCloneManager.deleteVoice(voiceId)
+                            .onSuccess {
+                                Log.d("VoiceManagement", "Successfully deleted from both Firestore and MiniMax: $voiceId")
+                            }
+                            .onFailure { miniMaxError ->
+                                Log.w("VoiceManagement", "Failed to delete from MiniMax: ${miniMaxError.message}")
+                                // Still consider it a success if Firestore delete succeeded
+                            }
+
+                        // Update local storage after successful Firestore delete
+                        val updatedProfile = profile.copy(voiceId = null)
+                        characterStorage.updateCharacter(updatedProfile)
+                        loadCharacters()
+                        onVoicesChanged()
+                    }
+                    .onFailure { e ->
+                        Log.e("VoiceManagement", "Failed to delete from Firestore: ${e.message}")
+                        deleteError = userVoiceManager.getUserFriendlyErrorMessage(e)
+
+                        // Show snackbar with retry option
+                        val snackbarResult = snackbarHostState.showSnackbar(
+                            message = "Failed to delete: $deleteError",
+                            actionLabel = "Retry",
+                            duration = SnackbarDuration.Long
+                        )
+                        when (snackbarResult) {
+                            SnackbarResult.ActionPerformed -> {
+                                // Retry delete
+                                deleteVoice(profile)
+                            }
+                            SnackbarResult.Dismissed -> {
+                                // User dismissed - do NOT proceed with local deletion
+                                // Only proceed if Firestore delete succeeded
+                                deleteError = "Delete failed: $deleteError"
+                            }
+                        }
+                    }
+            } ?: run {
+                // No voiceId, just update local
+                val updatedProfile = profile.copy(voiceId = null)
+                characterStorage.updateCharacter(updatedProfile)
+                loadCharacters()
+                onVoicesChanged()
+            }
+        }
+    }
+
+    // Delete API-only voice (exists on MiniMax/Firestore but not linked to local character)
+    fun deleteApiOnlyVoice(voiceId: String) {
+        scope.launch {
+            deleteError = null
+            userVoiceManager.deleteClonedVoice(voiceId)
+                .onSuccess {
+                    // Also delete from MiniMax
+                    voiceCloneManager.deleteVoice(voiceId)
+                        .onSuccess {
+                            Log.d("VoiceManagement", "Successfully deleted from both Firestore and MiniMax: $voiceId")
+                        }
+                        .onFailure { miniMaxError ->
+                            Log.w("VoiceManagement", "Failed to delete from MiniMax: ${miniMaxError.message}")
+                            // Still consider it a success if Firestore delete succeeded
+                        }
+
+                    apiOnlyVoiceIds = apiOnlyVoiceIds.filter { it != voiceId }
+                    onVoicesChanged()
+                }
+                .onFailure { e ->
+                    Log.e("VoiceManagement", "Failed to delete API voice from Firestore: ${e.message}")
+                    deleteError = userVoiceManager.getUserFriendlyErrorMessage(e)
+                    val snackbarResult = snackbarHostState.showSnackbar(
+                        message = "Failed to delete: $deleteError",
+                        actionLabel = "Retry",
+                        duration = SnackbarDuration.Long
+                    )
+                    when (snackbarResult) {
+                        SnackbarResult.ActionPerformed -> deleteApiOnlyVoice(voiceId)
+                        SnackbarResult.Dismissed -> deleteError = "Delete failed: $deleteError"
+                    }
+                }
+        }
     }
 
     // Play default voice function (for preset voices)
@@ -325,6 +441,7 @@ fun VoiceManagementScreen(
                             isDarkMode = isDarkMode,
                             onPlayClick = { voiceId -> playVoice(voiceId) },
                             onDeleteClick = { profile -> showDeleteDialog = profile },
+                            onDeleteApiVoiceClick = { voiceId -> showDeleteApiVoiceDialog = voiceId },
                             showDeleteDialog = showDeleteDialog,
                             onDismissDelete = { showDeleteDialog = null },
                             onConfirmDelete = {
@@ -336,6 +453,28 @@ fun VoiceManagementScreen(
                             surfaceColor = surfaceColor,
                             textColor = textColor
                         )
+
+                        // Delete confirmation dialog for API-only voices
+                        if (showDeleteApiVoiceDialog != null) {
+                            AlertDialog(
+                                onDismissRequest = { showDeleteApiVoiceDialog = null },
+                                title = { Text(translate("DELETE")) },
+                                text = { Text(translate("CONFIRM_DELETE_VOICE")) },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        deleteApiOnlyVoice(showDeleteApiVoiceDialog!!)
+                                        showDeleteApiVoiceDialog = null
+                                    }) {
+                                        Text(translate("DELETE"), color = Color(0xFFE53935))
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { showDeleteApiVoiceDialog = null }) {
+                                        Text(translate("CANCEL"))
+                                    }
+                                }
+                            )
+                        }
                     }
                     1 -> {
                         // Default Voices Tab
@@ -357,6 +496,31 @@ fun VoiceManagementScreen(
 
             // Clone new voice button (only show in Cloned Voices tab)
             if (selectedTab == 0) {
+                // Slot status indicator
+                if (slotStatus != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Voice Slots: ${slotStatus!!.used}/${slotStatus!!.limit}",
+                            fontSize = 12.sp,
+                            color = if (slotStatus!!.isFull) Color(0xFFE53935) else subtitleColor
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        LinearProgressIndicator(
+                            progress = { slotStatus!!.percentage },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(6.dp),
+                            color = if (slotStatus!!.isFull) Color(0xFFE53935) else Peach,
+                            trackColor = subtitleColor.copy(alpha = 0.2f),
+                        )
+                    }
+                }
+
                 Button(
                     onClick = onNavigateToVoiceClone,
                     modifier = Modifier
@@ -364,9 +528,10 @@ fun VoiceManagementScreen(
                         .height(56.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = Peach,
+                        containerColor = if (slotStatus?.isFull == true) subtitleColor else Peach,
                         contentColor = Color.White
-                    )
+                    ),
+                    enabled = slotStatus?.isFull != true
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Add,
@@ -375,7 +540,11 @@ fun VoiceManagementScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = translate("CLONE_FIRST_VOICE"),
+                        text = if (slotStatus?.isFull == true) {
+                            "Slot Full - Delete a voice first"
+                        } else {
+                            translate("CLONE_FIRST_VOICE")
+                        },
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -393,6 +562,45 @@ fun VoiceManagementScreen(
                 )
             }
         }
+
+        // Snackbar for error messages and retry
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 100.dp, start = 16.dp, end = 16.dp)
+        ) { data ->
+            val actionLabel = data.visuals.actionLabel
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (actionLabel != null) Color(0xFF424242) else Color(0xFFE53935),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = data.visuals.message,
+                        fontSize = 14.sp,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (actionLabel != null) {
+                        TextButton(
+                            onClick = { data.performAction() }
+                        ) {
+                            Text(
+                                text = actionLabel,
+                                color = Peach,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -404,6 +612,7 @@ private fun ApiOnlyVoiceItem(
     isPlaying: Boolean,
     isLoading: Boolean,
     onPlayClick: () -> Unit,
+    onDeleteClick: () -> Unit,
     subtitleColor: Color,
     surfaceColor: Color,
     textColor: Color
@@ -456,6 +665,13 @@ private fun ApiOnlyVoiceItem(
                         tint = if (isPlaying) Peach else textColor
                     )
                 }
+            }
+            IconButton(onClick = onDeleteClick) {
+                Icon(
+                    imageVector = Icons.Rounded.Delete,
+                    contentDescription = "Delete",
+                    tint = Color(0xFFE53935)
+                )
             }
         }
     }
@@ -553,6 +769,7 @@ private fun ClonedVoicesTab(
     isDarkMode: Boolean,
     onPlayClick: (String) -> Unit,
     onDeleteClick: (Profile) -> Unit,
+    onDeleteApiVoiceClick: (String) -> Unit,
     showDeleteDialog: Profile?,
     onDismissDelete: () -> Unit,
     onConfirmDelete: () -> Unit,
@@ -636,6 +853,7 @@ private fun ClonedVoicesTab(
                         isPlaying = playingVoiceId == voiceId,
                         isLoading = isLoading && playingVoiceId == voiceId,
                         onPlayClick = { onPlayClick(voiceId) },
+                        onDeleteClick = { onDeleteApiVoiceClick(voiceId) },
                         subtitleColor = subtitleColor,
                         surfaceColor = surfaceColor,
                         textColor = textColor

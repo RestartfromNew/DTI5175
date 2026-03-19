@@ -2,6 +2,8 @@ package com.example.chatpart.screens
 
 import android.Manifest
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.util.Log
 import android.os.VibrationEffect
@@ -19,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.MicOff
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,17 +39,24 @@ import androidx.compose.ui.unit.sp
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
 import com.example.chatpart.api.MiniMaxVoiceCloneManager
+import com.example.chatpart.data.ClonedVoice
+import com.example.chatpart.data.SlotStatus
+import com.example.chatpart.firestore.FirestoreError
+import com.example.chatpart.firestore.UserVoiceManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.voice.AudioRecordManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.UUID
 
 @Composable
 fun VoiceCloneScreen(
     isDarkMode: Boolean = false,
     characterName: String,
+    characterId: String,
+    userVoiceManager: UserVoiceManager,
     onVoiceCloned: (voiceId: String) -> Unit,
     onSkip: () -> Unit,
     onBack: () -> Unit
@@ -81,6 +91,39 @@ fun VoiceCloneScreen(
     var cloneSuccess by remember { mutableStateOf(false) }
     var cloneError by remember { mutableStateOf<String?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
+
+    // Network status
+    var isOffline by remember { mutableStateOf(false) }
+
+    // Snackbar state
+    val snackbarHostState = remember { SnackbarHostState() }
+    var pendingRetryAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    // Slot status for Firestore
+    var slotStatus by remember { mutableStateOf<SlotStatus?>(null) }
+    var isSlotFull by remember { mutableStateOf(false) }
+    var slotStatusError by remember { mutableStateOf<String?>(null) }
+
+    // Check network connectivity
+    fun checkNetworkStatus() {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork
+        val capabilities = connectivityManager.getNetworkCapabilities(network)
+        isOffline = capabilities == null || !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    // Load slot status
+    LaunchedEffect(Unit) {
+        checkNetworkStatus()
+        userVoiceManager.getSlotStatus().onSuccess {
+            slotStatus = it
+            isSlotFull = it.isFull
+            slotStatusError = null
+        }.onFailure { e ->
+            slotStatusError = userVoiceManager.getUserFriendlyErrorMessage(e)
+            Log.e("VoiceClone", "Failed to load slot status: ${e.message}")
+        }
+    }
 
     // Coroutine scope
     val scope = rememberCoroutineScope()
@@ -157,6 +200,114 @@ fun VoiceCloneScreen(
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Offline banner
+            if (isOffline) {
+                Surface(
+                    color = Color(0xFFFFF3E0),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MicOff,
+                            contentDescription = null,
+                            tint = Color(0xFFE65100),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Offline - Recording only, cannot clone",
+                            fontSize = 12.sp,
+                            color = Color(0xFFE65100)
+                        )
+                    }
+                }
+            }
+
+            // Slot status section
+            if (slotStatusError != null) {
+                // Error state with retry
+                Surface(
+                    color = surfaceColor,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "⚠ Slot status unavailable",
+                            fontSize = 12.sp,
+                            color = Color(0xFFE53935),
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(
+                            onClick = {
+                                slotStatusError = null
+                                scope.launch {
+                                    userVoiceManager.getSlotStatus().onSuccess {
+                                        slotStatus = it
+                                        isSlotFull = it.isFull
+                                    }.onFailure { e ->
+                                        slotStatusError = userVoiceManager.getUserFriendlyErrorMessage(e)
+                                    }
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Retry",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Retry", fontSize = 12.sp)
+                        }
+                    }
+                }
+            } else if (slotStatus != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Voice Slots: ${slotStatus!!.used}/${slotStatus!!.limit}",
+                        fontSize = 12.sp,
+                        color = if (isSlotFull) Color(0xFFE53935) else hintColor
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    LinearProgressIndicator(
+                        progress = { slotStatus!!.percentage },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(6.dp)
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = if (isSlotFull) Color(0xFFE53935) else peachColor,
+                        trackColor = hintColor.copy(alpha = 0.2f),
+                    )
+                }
+
+                if (isSlotFull) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Slot full. Please delete an existing voice first.",
+                        fontSize = 12.sp,
+                        color = Color(0xFFE53935)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             // Back button and title
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -178,7 +329,7 @@ fun VoiceCloneScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Description
             Text(
@@ -363,6 +514,23 @@ fun VoiceCloneScreen(
 
                 Button(
                     onClick = {
+                        // Check network first
+                        checkNetworkStatus()
+                        if (isOffline) {
+                            cloneError = "No network connection. Please check your internet."
+                            scope.launch {
+                                snackbarHostState.showSnackbar(
+                                    message = "No network - Voice cloning requires internet",
+                                    duration = SnackbarDuration.Short
+                                )
+                            }
+                            return@Button
+                        }
+                        // Check slot status first
+                        if (isSlotFull) {
+                            cloneError = "Voice slot is full. Please delete an existing voice first."
+                            return@Button
+                        }
                         // Check minimum duration (MiniMax requires at least 10 seconds)
                         if (recordingDuration < 10) {
                             cloneError = "Recording too short. Please record at least 10 seconds."
@@ -376,13 +544,67 @@ fun VoiceCloneScreen(
                         scope.launch {
                             if (recordedFile != null) {
                                 val result = manager.cloneVoice(recordedFile!!, characterName)
-                                isCloning = false
                                 result.onSuccess { voiceId ->
-                                    cloneSuccess = true
-                                    cloneError = null
-                                    delay(1000)
-                                    onVoiceCloned(voiceId)
+                                    // Prepare voice data for Firestore
+                                    val voice = ClonedVoice(
+                                        id = UUID.randomUUID().toString(),
+                                        voiceId = voiceId,
+                                        characterId = characterId,
+                                        characterName = characterName
+                                    )
+
+                                    // Save to Firestore with retry
+                                    userVoiceManager.addClonedVoice(voice)
+                                        .onSuccess {
+                                            cloneSuccess = true
+                                            cloneError = null
+                                            isCloning = false
+                                            delay(1000)
+                                            onVoiceCloned(voiceId)
+                                        }
+                                        .onFailure { firestoreError ->
+                                            Log.e("VoiceClone", "Firestore save failed: ${firestoreError.message}")
+                                            isCloning = false
+                                            // Show error with retry option
+                                            val errorMsg = userVoiceManager.getUserFriendlyErrorMessage(firestoreError)
+                                            cloneError = "$errorMsg (Voice cloned but not saved)"
+
+                                            // Show Snackbar with retry
+                                            val snackbarResult = snackbarHostState.showSnackbar(
+                                                message = "Failed to save voice: $errorMsg",
+                                                actionLabel = "Retry",
+                                                duration = SnackbarDuration.Long
+                                            )
+                                            when (snackbarResult) {
+                                                SnackbarResult.ActionPerformed -> {
+                                                    // Retry saving to Firestore
+                                                    isCloning = true
+                                                    userVoiceManager.addClonedVoice(voice)
+                                                        .onSuccess {
+                                                            cloneSuccess = true
+                                                            cloneError = null
+                                                            isCloning = false
+                                                            delay(1000)
+                                                            onVoiceCloned(voiceId)
+                                                        }
+                                                        .onFailure { retryError ->
+                                                            isCloning = false
+                                                            cloneSuccess = false
+                                                            cloneError = "Failed to save: ${userVoiceManager.getUserFriendlyErrorMessage(retryError)}"
+                                                            Log.e("VoiceClone", "Retry failed: ${retryError.message}")
+                                                            // Don't proceed if retry also fails
+                                                        }
+                                                }
+                                                SnackbarResult.Dismissed -> {
+                                                    // User dismissed - DON'T proceed with voice cloning
+                                                    // Only proceed if Firestore save succeeded
+                                                    cloneSuccess = false
+                                                    cloneError = "Voice cloned but not saved to cloud"
+                                                }
+                                            }
+                                        }
                                 }.onFailure { error ->
+                                    isCloning = false
                                     Log.e("VoiceClone", "Clone failed: ${error.message}")
                                     val msg = error.message ?: "Unknown error"
                                     cloneError = when {
@@ -405,16 +627,55 @@ fun VoiceCloneScreen(
                         .height(56.dp),
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = peachColor,
+                        containerColor = if (isSlotFull) hintColor else peachColor,
                         contentColor = Color.White
                     ),
-                    enabled = recordedFile != null && !isCloning
+                    enabled = recordedFile != null && !isCloning && !isSlotFull
                 ) {
                     Text(sendCloneText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // Snackbar for error messages and retry
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 100.dp, start = 16.dp, end = 16.dp)
+        ) { data ->
+            val actionLabel = data.visuals.actionLabel
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = if (actionLabel != null) Color(0xFF424242) else Color(0xFFE53935),
+                shadowElevation = 8.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = data.visuals.message,
+                        fontSize = 14.sp,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (actionLabel != null) {
+                        TextButton(
+                            onClick = { data.performAction() }
+                        ) {
+                            Text(
+                                text = actionLabel,
+                                color = Peach,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

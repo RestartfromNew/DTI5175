@@ -186,6 +186,36 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
      *
      * Example: characterId="Alex" → "cpAlex_a1b2c3d4"
      */
+    /**
+     * Delete a cloned voice from MiniMax
+     *
+     * @param voiceId The voice_id to delete
+     * @return Result.success if deleted, Result.failure otherwise
+     */
+    suspend fun deleteVoice(voiceId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val payload = mapOf(
+                "voice_type" to "voice_cloning",
+                "voice_id" to voiceId
+            )
+
+            val request = Request.Builder()
+                .url("${MiniMaxConfig.BASE_URL}/v1/delete_voice")
+                .post(gson.toJson(payload).toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            val body = response.body?.string() ?: throw IOException("Empty response from delete_voice")
+
+            val json = gson.fromJson(body, JsonObject::class.java)
+            val statusCode = json.getAsJsonObject("base_resp")?.get("status_code")?.asInt ?: -1
+            if (statusCode != 0) {
+                val errorMsg = json.getAsJsonObject("base_resp")?.get("status_msg")?.asString ?: "Unknown error"
+                throw IOException("delete_voice failed (code $statusCode): $errorMsg")
+            }
+        }
+    }
+
     fun buildVoiceId(characterId: String): String {
         val sanitized = characterId
             .filter { it.isLetterOrDigit() || it == '-' || it == '_' }

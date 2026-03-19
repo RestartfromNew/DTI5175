@@ -23,6 +23,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,8 @@ import com.example.chatpart.domain.Profile
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
 import com.example.chatpart.llm.AITest
+import com.example.chatpart.firestore.UserVoiceManager
+import kotlinx.coroutines.launch
 import java.util.UUID
 
 data class TabItem(
@@ -216,6 +219,18 @@ class MainActivity : ComponentActivity() {
 
             // Track auth state
             var currentUser by remember { mutableStateOf(authManager.currentUser) }
+
+            // UserVoiceManager for Firestore operations (created when user signs in)
+            var userVoiceManager by remember { mutableStateOf<UserVoiceManager?>(null) }
+
+            // Initialize UserVoiceManager when user signs in
+            LaunchedEffect(currentUser) {
+                currentUser?.let { user ->
+                    userVoiceManager = UserVoiceManager(user.uid)
+                    // Ensure user document exists in Firestore
+                    userVoiceManager?.ensureUserExists(user.email ?: "")
+                }
+            }
 
             // Onboarding flow state
             var onboardingGender by remember { mutableStateOf<String?>(null) }
@@ -421,9 +436,15 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     PAGE_VOICE_CLONE -> {
-                        VoiceCloneScreen(
+                        if (userVoiceManager == null) {
+                            goBack()
+                        } else {
+                            val manager = userVoiceManager!!
+                            VoiceCloneScreen(
                             isDarkMode = isDarkMode,
                             characterName = pendingVoiceCloneProfile?.name ?: "Character",
+                            characterId = pendingVoiceCloneProfile?.id ?: "unknown",
+                            userVoiceManager = manager,
                             onVoiceCloned = { voiceId ->
                                 // Update profile with voice ID and save
                                 val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
@@ -460,12 +481,18 @@ class MainActivity : ComponentActivity() {
                                 goBack() // Can always go back regardless of entry point
                             }
                         )
+                        }
                     }
                     PAGE_VOICE_MANAGEMENT -> {
-                        VoiceManagementScreen(
+                        if (userVoiceManager == null) {
+                            goBack()
+                        } else {
+                            val manager = userVoiceManager!!
+                            VoiceManagementScreen(
                             isDarkMode = isDarkMode,
                             currentLanguage = currentLanguage,
                             characterStorage = characterStorage,
+                            userVoiceManager = manager,
                             onNavigateToVoiceClone = {
                                 // Navigate to voice clone - mark as NOT from onboarding (from settings)
                                 pendingVoiceCloneProfile = Profile(
@@ -486,6 +513,7 @@ class MainActivity : ComponentActivity() {
                                 characters = characterStorage.loadCharacters()
                             }
                         )
+                        }
                     }
                     else -> {
                         // Main page with tab navigation

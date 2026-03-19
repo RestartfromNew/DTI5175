@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================
+    // 用户数据规则
+    // ============================================
+    match /users/{userId} {
+      // 已登录用户可以读取自己的数据
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // 已登录用户可以创建自己的数据
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        // 确保新数据包含必填字段
+        && request.resource.data.keys().hasAll(['slotLimit', 'slotUsed', 'voices', 'email', 'createdAt', 'updatedAt'])
+        // slotLimit 必须是正整数，默认只能为 1
+        && request.resource.data.slotLimit is int
+        && request.resource.data.slotLimit >= 1
+        && request.resource.data.slotLimit <= 10
+        // slotUsed 必须是 0
+        && request.resource.data.slotUsed == 0
+        // voices 必须是空数组
+        && request.resource.data.voices == []
+        // email 必须与当前用户匹配
+        && request.resource.data.email == request.auth.token.email;
+
+      // 更新规则：只能修改自己的数据，且不能篡改 slotLimit
+      allow update: if request.auth != null
+        && request.auth.uid == userId
+        // 禁止修改 slotLimit 和 createdAt（需要后台管理员接口）
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['slotLimit', 'createdAt'])
+        // slotUsed 必须是合法值（0 到 slotLimit 之间）
+        && request.resource.data.slotUsed is int
+        && request.resource.data.slotUsed >= 0
+        && request.resource.data.slotUsed <= request.resource.data.slotLimit
+        // voices 数组大小必须等于 slotUsed（确保一致性）
+        && request.resource.data.voices.size() == request.resource.data.slotUsed
+        // voices 数组每个元素必须是有效对象
+        && validateVoices(request.resource.data.voices);
+
+      // 删除规则：禁止客户端直接删除用户数据（需要后台接口）
+      allow delete: if false;
+    }
+
+    // ============================================
+    // 辅助函数
+    // ============================================
+
+    // 验证 voices 数组中每个元素的结构
+    // Firestore 规则中，使用条件表达式来验证每个索引的元素
+    function validateVoices(voices) {
+      return voices is list
+        && voices.size() <= 10
+        && (voices.size() == 0 || isValidVoice(voices[0]))
+        && (voices.size() == 1 || isValidVoice(voices[1]))
+        && (voices.size() == 2 || isValidVoice(voices[2]))
+        && (voices.size() == 3 || isValidVoice(voices[3]))
+        && (voices.size() == 4 || isValidVoice(voices[4]))
+        && (voices.size() == 5 || isValidVoice(voices[5]))
+        && (voices.size() == 6 || isValidVoice(voices[6]))
+        && (voices.size() == 7 || isValidVoice(voices[7]))
+        && (voices.size() == 8 || isValidVoice(voices[8]))
+        && (voices.size() == 9 || isValidVoice(voices[9]));
+    }
+
+    // 验证单个 voice 对象的结构
+    function isValidVoice(voice) {
+      return voice is map
+        && 'id' in voice && voice.id is string && voice.id.size() > 0
+        && 'voiceId' in voice && voice.voiceId is string && voice.voiceId.size() > 0
+        && 'characterId' in voice && voice.characterId is string
+        && 'characterName' in voice && voice.characterName is string
+        && 'createdAt' in voice && voice.createdAt is int && voice.createdAt > 0
+        && 'lastUsedAt' in voice && voice.lastUsedAt is int && voice.lastUsedAt > 0;
+    }
+  }
+}

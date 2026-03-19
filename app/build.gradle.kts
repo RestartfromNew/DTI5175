@@ -78,6 +78,9 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.auth)
 
+    // Kotlin Coroutines for Firebase
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+
     // Google Sign-In
     implementation(libs.credentials)
     implementation(libs.credentials.play.services.auth)
