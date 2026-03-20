@@ -184,25 +184,25 @@ class MiniMaxLlmClient : LlmClient {
     private fun extractEmotion(text: String): String {
         // 简单实现：如果文本包含特定情感词则提取
         // 可以根据实际需求改进
+        // MiniMax TTS 只接受这几个值: happy / sad / angry / fearful / disgusted / surprised
+        // "excited" 不是合法值会报 invalid params，映射到 "happy"
+        // "neutral" 留空（不传 emotion 参数）让 TTS 自动处理
         val emotionPatterns = mapOf(
-            "happy" to listOf("😊", "happy", "great", "wonderful", "太好了", "开心"),
-            "sad" to listOf("😢", "sad", "sorry", "unfortunately", "遗憾", "难过"),
-            "excited" to listOf("😄", "excited", "amazing", "wonderful", "兴奋", "激动"),
+            "happy"     to listOf("😊", "😄", "happy", "excited", "great", "wonderful", "amazing", "太好了", "开心", "兴奋", "激动"),
+            "sad"       to listOf("😢", "sad", "sorry", "unfortunately", "遗憾", "难过"),
             "surprised" to listOf("😮", "surprised", "wow", "unexpected", "惊讶", "意外"),
-            "neutral" to listOf()
+            "angry"     to listOf("😠", "angry", "frustrated", "annoyed", "愤怒", "生气")
         )
 
         for ((emotion, patterns) in emotionPatterns) {
-            if (emotion != "neutral") {
-                for (pattern in patterns) {
-                    if (text.contains(pattern, ignoreCase = true)) {
-                        return emotion
-                    }
+            for (pattern in patterns) {
+                if (text.contains(pattern, ignoreCase = true)) {
+                    return emotion
                 }
             }
         }
 
-        return "neutral"
+        return ""  // 空字符串 → VoiceSetting.emotion = null → TTS 自动决定
     }
 }
 

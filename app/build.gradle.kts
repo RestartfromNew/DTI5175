@@ -8,6 +8,8 @@ val aiKey = localProps.getProperty("API_Key") ?: ""
 val minimaxApiKey = localProps.getProperty("MINIMAX_API_KEY") ?: ""
 val minimaxGroupId = localProps.getProperty("MINIMAX_GROUP_ID") ?: ""
 val minimaxBaseUrl = localProps.getProperty("MINIMAX_BASE_URL") ?: ""
+val assemblyAiApiKey = localProps.getProperty("ASSEMBLYAI_API_KEY") ?: ""
+val deepgramApiKey = localProps.getProperty("DEEPGRAM_API_KEY") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -36,6 +38,8 @@ android {
         buildConfigField("String", "MINIMAX_API_KEY", "\"$minimaxApiKey\"")
         buildConfigField("String", "MINIMAX_GROUP_ID", "\"$minimaxGroupId\"")
         buildConfigField("String", "MINIMAX_BASE_URL", "\"$minimaxBaseUrl\"")
+        buildConfigField("String", "ASSEMBLYAI_API_KEY", "\"$assemblyAiApiKey\"")
+        buildConfigField("String", "DEEPGRAM_API_KEY", "\"$deepgramApiKey\"")
     }
 
     buildTypes {

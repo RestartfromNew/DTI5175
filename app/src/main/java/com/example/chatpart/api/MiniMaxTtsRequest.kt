@@ -85,3 +85,34 @@ data class BaseResp(
     @SerializedName("status_msg")
     val status_msg: String
 )
+
+// ==================== STT ====================
+
+data class MiniMaxSttCreateResponse(
+    @SerializedName("generation_id")
+    val generation_id: String?,
+
+    @SerializedName("base_resp")
+    val base_resp: BaseResp?
+)
+
+data class MiniMaxSttPollResponse(
+    @SerializedName("status")
+    val status: String?,       // "Processing" | "Succeeded" | "Failed"
+
+    @SerializedName("file")
+    val file: SttResultFile?,
+
+    @SerializedName("base_resp")
+    val base_resp: BaseResp?
+)
+
+data class SttResultFile(
+    @SerializedName("transcription")
+    val transcription: SttTranscription?
+)
+
+data class SttTranscription(
+    @SerializedName("full_text")
+    val full_text: String?
+)

@@ -12,7 +12,7 @@ val Pink40 = Color(0xFF7D5260)
 
 // App specific colors - Light Theme
 val Peach = Color(0xFFFF9D85)
-val Lavender = Color(0xB6A6FF)
+val Lavender = Color(0xFFB6A6FF)
 val SoftWhite = Color(0xFFFFF9F6)
 val DarkText = Color(0xFF2D2D2D)
 

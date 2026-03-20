@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
 package com.example.chatpart.screens
 
 import android.Manifest
@@ -1050,6 +1052,202 @@ fun ChatBubble(
                         contentDescription = "Convert to text",
                         tint = Peach.copy(alpha = 0.7f),
                         modifier = Modifier.size(14.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─── Character List Screen ──────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CharacterListScreen(
+    isDarkMode: Boolean,
+    characters: List<Profile>,
+    selectedCharacterId: String,
+    onSelectCharacter: (Profile) -> Unit,
+    onCreateNew: () -> Unit,
+    onEdit: (Profile) -> Unit,
+    onDelete: (Profile) -> Unit,
+    onBack: () -> Unit,
+    onVoiceCall: (Profile) -> Unit
+) {
+    val backgroundColor = if (isDarkMode) Color(0xFF1A1A2E) else Color(0xFFFFFBFE)
+    val surfaceColor = if (isDarkMode) Color(0xFF2D2D44) else Color.White
+    val onSurfaceColor = if (isDarkMode) Color.White else Color(0xFF1C1B1F)
+    val primaryColor = Lavender
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = LocalizedString("CHARACTERS"),
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.Rounded.ArrowBack,
+                            contentDescription = LocalizedString("BACK")
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = surfaceColor,
+                    titleContentColor = onSurfaceColor
+                )
+            )
+        },
+        floatingActionButton = {
+            ExtendedFloatingActionButton(
+                onClick = onCreateNew,
+                containerColor = primaryColor,
+                contentColor = Color.White
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(LocalizedString("CREATE_NEW"))
+            }
+        },
+        containerColor = backgroundColor
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            items(characters) { character ->
+                CharacterListItem(
+                    character = character,
+                    isSelected = character.id == selectedCharacterId,
+                    onClick = { onSelectCharacter(character) },
+                    onEdit = { onEdit(character) },
+                    onDelete = { onDelete(character) },
+                    onVoiceCall = { onVoiceCall(character) },
+                    surfaceColor = surfaceColor,
+                    onSurfaceColor = onSurfaceColor,
+                    primaryColor = primaryColor,
+                    isDarkMode = isDarkMode
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CharacterListItem(
+    character: Profile,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+    onVoiceCall: () -> Unit,
+    surfaceColor: Color,
+    onSurfaceColor: Color,
+    primaryColor: Color,
+    isDarkMode: Boolean
+) {
+    var showMenu by remember { mutableStateOf(false) }
+
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) primaryColor.copy(alpha = 0.12f) else surfaceColor
+        ),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(2.dp, primaryColor) else null
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Avatar
+            Surface(
+                shape = CircleShape,
+                color = primaryColor.copy(alpha = 0.2f),
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = character.name.firstOrNull()?.toString() ?: "?",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = primaryColor
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(16.dp))
+
+            // Info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = character.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = onSurfaceColor
+                )
+                Text(
+                    text = "${character.gender} · ${character.relationship}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = onSurfaceColor.copy(alpha = 0.7f)
+                )
+            }
+
+            // Voice call button
+            IconButton(onClick = onVoiceCall) {
+                Icon(
+                    imageVector = Icons.Rounded.Call,
+                    contentDescription = LocalizedString("VOICE_CALL"),
+                    tint = primaryColor
+                )
+            }
+
+            // Menu
+            Box {
+                IconButton(onClick = { showMenu = true }) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = LocalizedString("MORE_OPTIONS"),
+                        tint = onSurfaceColor.copy(alpha = 0.6f)
+                    )
+                }
+
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text(LocalizedString("EDIT")) },
+                        onClick = {
+                            showMenu = false
+                            onEdit()
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Rounded.Edit, contentDescription = null)
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text(LocalizedString("DELETE")) },
+                        onClick = {
+                            showMenu = false
+                            onDelete()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Rounded.Delete,
+                                contentDescription = null,
+                                tint = Color.Red
+                            )
+                        }
                     )
                 }
             }

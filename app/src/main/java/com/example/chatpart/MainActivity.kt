@@ -5,9 +5,13 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.History
@@ -15,7 +19,10 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.rounded.Call
+import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -32,8 +39,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.chatpart.auth.GoogleAuthManager
@@ -50,10 +63,12 @@ import com.example.chatpart.screens.CharacterDetailScreen
 import com.example.chatpart.screens.LanguageSelectionScreen
 import com.example.chatpart.screens.VoiceCloneScreen
 import com.example.chatpart.screens.VoiceManagementScreen
+import com.example.chatpart.screens.LiveVoiceScreen
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.ui.theme.ChatPartTheme
+import com.example.chatpart.ui.theme.Lavender
 import com.example.chatpart.ui.theme.Peach
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
@@ -120,6 +135,7 @@ class MainActivity : ComponentActivity() {
         const val PAGE_LANGUAGE_SELECT = 10
         const val PAGE_VOICE_CLONE = 11
         const val PAGE_VOICE_MANAGEMENT = 12
+        const val PAGE_LIVE_VOICE = 13
 
         // Onboarding pages set (for filtering in goBack)
         val ONBOARDING_PAGES = setOf(
@@ -238,6 +254,7 @@ class MainActivity : ComponentActivity() {
             var onboardingName by remember { mutableStateOf("") }
             var onboardingRelationship by remember { mutableStateOf("") }
             var pendingVoiceCloneProfile by remember { mutableStateOf<Profile?>(null) }
+            var currentVoiceCallCharacter by remember { mutableStateOf<Profile?>(null) }
 
             // Apply theme based on dark mode
             ChatPartTheme(darkTheme = isDarkMode) {
@@ -260,17 +277,13 @@ class MainActivity : ComponentActivity() {
                     PAGE_ONBOARDING_2 -> {
                         CloudOnboardingScreen(
                             onSkip = {
-                                // 新引导流程: Onboarding → 语言选择 → 性别选择 → 头像选择 → 基本资料 → 详细资料 → 主界面
                                 if (authManager.isSignedIn) {
-                                    // 已登录用户直接进入语言选择
                                     navigateTo(PAGE_LANGUAGE_SELECT)
                                 } else {
-                                    // 未登录用户先登录
                                     navigateTo(PAGE_LOGIN)
                                 }
                             },
                             onNext = {
-                                // 新引导流程: Onboarding → 语言选择 → 性别选择 → 头像选择 → 基本资料 → 详细资料 → 主界面
                                 if (authManager.isSignedIn) {
                                     navigateTo(PAGE_LANGUAGE_SELECT)
                                 } else {
@@ -280,13 +293,11 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                     PAGE_LOGIN -> {
-                        // 首次使用登录后跳转新引导流程
                         LoginScreen(
                             authManager = authManager,
                             onSignInSuccess = {
                                 currentUser = authManager.currentUser
                                 Log.d("Firebase", "✅ User signed in: ${currentUser?.displayName}")
-                                // 登录后跳转到语言选择
                                 navigateTo(PAGE_LANGUAGE_SELECT)
                             }
                         )
@@ -316,8 +327,28 @@ class MainActivity : ComponentActivity() {
                             },
                             onBack = {
                                 navigateTo(PAGE_MAIN)
+                            },
+                            onVoiceCall = { profile ->
+                                currentVoiceCallCharacter = profile
+                                navigateTo(PAGE_LIVE_VOICE)
                             }
                         )
+                    }
+                    PAGE_LIVE_VOICE -> {
+                        currentVoiceCallCharacter?.let { character ->
+                            LiveVoiceScreen(
+                                character = character,
+                                brain = personChat,
+                                chatHistory = emptyList(),
+                                onEndCall = {
+                                    currentVoiceCallCharacter = null
+                                    goBack()
+                                },
+                                onMessageAdded = { _, _ -> }
+                            )
+                        } ?: run {
+                            LaunchedEffect(Unit) { goBack() }
+                        }
                     }
                     PAGE_CHARACTER_EDITOR -> {
                         CharacterEditorScreen(
@@ -335,11 +366,9 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                // 创建完成后直接进入主界面
                                 navigateTo(PAGE_MAIN)
                             },
                             onCancel = {
-                                // 取消后返回角色列表或主界面
                                 navigateTo(if (characters.isEmpty()) PAGE_ONBOARDING_2 else PAGE_CHARACTER_LIST)
                             }
                         )
@@ -364,7 +393,6 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_AVATAR_SELECT)
                             },
                             onSkip = {
-                                // Skip to main (for editing existing character)
                                 navigateTo(if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN)
                             }
                         )
@@ -381,7 +409,6 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_GENDER_SELECT)
                             },
                             onSkip = {
-                                // Skip to main
                                 navigateTo(if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN)
                             }
                         )
@@ -400,7 +427,6 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_AVATAR_SELECT)
                             },
                             onSkip = {
-                                // 如果没有填写信息就跳过，返回角色列表
                                 navigateTo(PAGE_CHARACTER_LIST)
                             }
                         )
@@ -419,7 +445,6 @@ class MainActivity : ComponentActivity() {
                             isDarkMode = isDarkMode,
                             basicProfile = basicProfile,
                             onSave = { profile ->
-                                // Go to voice clone screen - mark as from onboarding
                                 pendingVoiceCloneProfile = profile
                                 voiceCloneFromOnboarding = true
                                 navigateTo(PAGE_VOICE_CLONE)
@@ -428,7 +453,6 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_CHARACTER_BASIC)
                             },
                             onSkip = {
-                                // Go to voice clone screen without additional details - mark as from onboarding
                                 pendingVoiceCloneProfile = basicProfile
                                 voiceCloneFromOnboarding = true
                                 navigateTo(PAGE_VOICE_CLONE)
@@ -446,7 +470,6 @@ class MainActivity : ComponentActivity() {
                             characterId = pendingVoiceCloneProfile?.id ?: "unknown",
                             userVoiceManager = manager,
                             onVoiceCloned = { voiceId ->
-                                // Update profile with voice ID and save
                                 val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
                                 if (profile != null) {
                                     characterStorage.addCharacter(profile)
@@ -454,15 +477,13 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                // Use different navigation based on entry point
                                 if (voiceCloneFromOnboarding) {
                                     completeOnboardingAndGoToMain()
                                 } else {
-                                    goBack() // Return to VoiceManagement
+                                    goBack()
                                 }
                             },
                             onSkip = {
-                                // Save profile without voice cloning
                                 val profile = pendingVoiceCloneProfile
                                 if (profile != null) {
                                     characterStorage.addCharacter(profile)
@@ -470,15 +491,14 @@ class MainActivity : ComponentActivity() {
                                     characterStorage.saveSelectedCharacterId(profile.id)
                                     selectedCharacter = profile
                                 }
-                                // Use different navigation based on entry point
                                 if (voiceCloneFromOnboarding) {
                                     completeOnboardingAndGoToMain()
                                 } else {
-                                    goBack() // Return to VoiceManagement
+                                    goBack()
                                 }
                             },
                             onBack = {
-                                goBack() // Can always go back regardless of entry point
+                                goBack()
                             }
                         )
                         }
@@ -494,7 +514,6 @@ class MainActivity : ComponentActivity() {
                             characterStorage = characterStorage,
                             userVoiceManager = manager,
                             onNavigateToVoiceClone = {
-                                // Navigate to voice clone - mark as NOT from onboarding (from settings)
                                 pendingVoiceCloneProfile = Profile(
                                     id = "temp_voice_${System.currentTimeMillis()}",
                                     name = "New Voice",
@@ -509,7 +528,6 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_MAIN)
                             },
                             onVoicesChanged = {
-                                // Refresh characters list
                                 characters = characterStorage.loadCharacters()
                             }
                         )
@@ -538,7 +556,11 @@ class MainActivity : ComponentActivity() {
                             },
                             currentLanguage = currentLanguage,
                             onLanguageChange = { code -> currentLanguage = code },
-                            onNavigateToVoices = { navigateTo(PAGE_VOICE_MANAGEMENT) }
+                            onNavigateToVoices = { navigateTo(PAGE_VOICE_MANAGEMENT) },
+                            onNavigateToLiveVoice = {
+                                currentVoiceCallCharacter = selectedCharacter
+                                navigateTo(PAGE_LIVE_VOICE)
+                            }
                         )
                     }
                 }
@@ -560,7 +582,8 @@ fun MainTabScreen(
     onSignOut: () -> Unit = {},
     onSelectCharacter: (Profile) -> Unit = {},
     currentLanguage: String = "zh",
-    onLanguageChange: (String) -> Unit = {}
+    onLanguageChange: (String) -> Unit = {},
+    onNavigateToLiveVoice: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -613,6 +636,24 @@ fun MainTabScreen(
             }
         }
     ) { innerPadding ->
+        // 浮动按钮拖动状态
+        val configuration = LocalConfiguration.current
+        val density = LocalDensity.current
+        val buttonSize = 64.dp
+        val buttonSizePx = with(density) { buttonSize.toPx() }
+        val screenWidthPx = configuration.screenWidthDp * density.density
+        val screenHeightPx = configuration.screenHeightDp * density.density
+        val bottomPaddingPx = with(density) { innerPadding.calculateBottomPadding().toPx() }
+        val topPaddingPx = with(density) { innerPadding.calculateTopPadding().toPx() }
+        // 可拖动范围：屏幕宽高减去 padding 和按钮自身尺寸
+        val maxDragX = screenWidthPx - buttonSizePx
+        val maxDragY = screenHeightPx - topPaddingPx - bottomPaddingPx - buttonSizePx
+        val initialOffsetX = screenWidthPx - buttonSizePx - with(density) { 16.dp.toPx() }
+
+        var buttonOffsetX by remember { mutableStateOf(initialOffsetX) }
+        var buttonOffsetY by remember { mutableStateOf(with(density) { 16.dp.toPx() }) }
+        val haptic = LocalHapticFeedback.current
+
         Box(modifier = Modifier.padding(innerPadding)) {
             when (selectedTab) {
                 0 -> ChatScreen(
@@ -694,6 +735,42 @@ fun MainTabScreen(
                     onSignOut = onSignOut,
                     onLanguageChange = onLanguageChange
                 )
+            }
+
+            // 可拖动 Live Voice 浮动按钮
+            // 修复：pointerInput 和 offset 只作用于按钮大小的 Box，不拦截全屏触摸
+            Box(
+                modifier = Modifier
+                    .size(buttonSize)
+                    .offset { IntOffset(buttonOffsetX.toInt(), buttonOffsetY.toInt()) }
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragStart = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                buttonOffsetX = (buttonOffsetX + dragAmount.x).coerceIn(0f, maxDragX)
+                                buttonOffsetY = (buttonOffsetY + dragAmount.y).coerceIn(0f, maxDragY)
+                            }
+                        )
+                    }
+            ) {
+                FilledIconButton(
+                    onClick = onNavigateToLiveVoice,
+                    modifier = Modifier.size(buttonSize),
+                    shape = CircleShape,
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = Lavender,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Call,
+                        contentDescription = "Live Voice Chat",
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
             }
         }
     }
