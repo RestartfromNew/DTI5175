@@ -82,6 +82,7 @@ import com.example.chatpart.api.MiniMaxAudioClient
 import com.example.chatpart.data.PersonChat
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Profile
+import com.example.chatpart.i18n.Languages
 import com.example.chatpart.ui.theme.DeepSpaceBlack
 import com.example.chatpart.ui.theme.ElectricPurple
 import com.example.chatpart.ui.theme.EnergyBallGradient
@@ -121,11 +122,15 @@ fun LiveVoiceScreen(
     chatHistory: List<Message>,
     onEndCall: () -> Unit,
     onMessageAdded: (userText: String, aiText: String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentLanguage: String = "en"
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Helper function for localized strings
+    fun t(key: String) = Languages.getString(currentLanguage, key)
 
     // 通话时长
     var callDuration by remember { mutableLongStateOf(0L) }
@@ -155,7 +160,7 @@ fun LiveVoiceScreen(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         if (!isGranted) {
-            errorMessage = "需要麦克风权限才能使用语音功能，请在系统设置中允许"
+            errorMessage = t("LIVE_MIC_PERMISSION")
             scope.launch {
                 delay(4000)
                 errorMessage = ""
@@ -166,7 +171,7 @@ fun LiveVoiceScreen(
     // 创建 Controller
     val audioClient = remember { MiniMaxAudioClient(context) }
     val controller = remember {
-        LiveVoiceController(context, brain, audioClient, scope)
+        LiveVoiceController(context, brain, audioClient, scope, currentLanguage)
     }
 
     // 绑定 Controller 回调
@@ -253,7 +258,8 @@ fun LiveVoiceScreen(
             voiceState = voiceState,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 280.dp)
+                .padding(top = 280.dp),
+            currentLanguage = currentLanguage
         )
 
         // 5. 实时语音波形
@@ -269,10 +275,10 @@ fun LiveVoiceScreen(
 
         // 6. 状态提示文字（麦克风按钮上方）
         val statusHint = when (voiceState) {
-            LiveVoiceState.IDLE -> "按住麦克风说话"
-            LiveVoiceState.USER_SPEAKING -> "正在聆听..."
-            LiveVoiceState.PROCESSING -> "思考中..."
-            LiveVoiceState.AI_SPEAKING -> "正在回答..."
+            LiveVoiceState.IDLE -> t("LIVE_HOLD_TO_SPEAK")
+            LiveVoiceState.USER_SPEAKING -> t("LIVE_LISTENING")
+            LiveVoiceState.PROCESSING -> t("LIVE_THINKING")
+            LiveVoiceState.AI_SPEAKING -> t("LIVE_SPEAKING")
         }
         Column(
             modifier = Modifier
@@ -344,8 +350,10 @@ fun CaptionArea(
     userCaption: String,
     aiCaption: String,
     voiceState: LiveVoiceState,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    currentLanguage: String = "en"
 ) {
+    fun t(key: String) = Languages.getString(currentLanguage, key)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -367,7 +375,7 @@ fun CaptionArea(
         when (voiceState) {
             LiveVoiceState.PROCESSING -> {
                 CaptionBubble(
-                    text = "思考中...",
+                    text = t("LIVE_THINKING"),
                     isUser = false,
                     isPartial = true
                 )

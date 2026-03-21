@@ -12,6 +12,7 @@ import android.os.VibratorManager
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import android.widget.Toast
+import com.example.chatpart.api.DeepgramAsrClient
 import com.example.chatpart.api.MiniMaxAudioClient
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,6 +58,8 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.chatpart.DarkText
 import com.example.chatpart.Lavender
 import com.example.chatpart.Peach
@@ -65,6 +68,7 @@ import com.example.chatpart.voice.AudioRecordManager
 import com.google.firebase.auth.FirebaseUser
 import com.example.chatpart.data.PersonChat
 import com.example.chatpart.data.ChatHistoryManager
+import com.example.chatpart.data.ChatbotPreferences
 import com.example.chatpart.data.ChatMessageData
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.domain.Result
@@ -89,11 +93,14 @@ data class ChatbotAvatar(
 )
 
 data class ChatMessage(
+    val id: String = java.util.UUID.randomUUID().toString(),
     val text: String,
     val isFromUser: Boolean,
     val isVoice: Boolean = false,
     val voiceDurationSec: Int = 0,
-    val voiceFilePath: String? = null   // absolute path to WAV file for STT replay
+    val voiceFilePath: String? = null,   // absolute path to WAV file for STT replay
+    val subtitle: String? = null,        // transcribed text (always stored)
+    val isSubtitleExpanded: Boolean = false  // per-bubble: true = show subtitle
 )
 
 // Default AI Chatbots - only 3 (use getDefaultChatbots() composable function)
@@ -174,8 +181,18 @@ fun ChatScreen(
         defaultChatbotsList + customBots
     }
 
-    // Chatbot selection
-    var selectedBot by remember { mutableStateOf(allChatbots.firstOrNull() ?: defaultChatbotsList[0]) }
+    // Chatbot preferences - remember last selected bot
+    val chatbotPreferences = remember { ChatbotPreferences(context) }
+    val savedBotId = remember { chatbotPreferences.getSelectedBotId() }
+
+    // Chatbot selection - restore from saved preference or default to first
+    var selectedBot by remember {
+        mutableStateOf(
+            allChatbots.find { it.id == savedBotId }
+                ?: allChatbots.firstOrNull()
+                ?: defaultChatbotsList[0]
+        )
+    }
     var showAvatarPicker by remember { mutableStateOf(false) }
 
     // Helper function to resolve the correct Profile for the selected bot
@@ -210,14 +227,17 @@ fun ChatScreen(
             if (saved.isNotEmpty()) {
                 saved.map {
                     ChatMessage(
+                        id = it.id,
                         text = it.text,
                         isFromUser = it.isFromUser,
                         isVoice = it.isVoice,
-                        voiceDurationSec = it.voiceDurationSec
+                        voiceDurationSec = it.voiceDurationSec,
+                        voiceFilePath = it.voiceFilePath,
+                        subtitle = it.subtitle
                     )
                 }
             } else {
-                listOf(ChatMessage(selectedBot.greeting, isFromUser = false))
+                listOf(ChatMessage(text = selectedBot.greeting, isFromUser = false))
             }
         })
     }
@@ -226,10 +246,13 @@ fun ChatScreen(
     LaunchedEffect(messages, selectedBot) {
         val dataMessages = messages.map {
             ChatMessageData(
+                id = it.id,
                 text = it.text,
                 isFromUser = it.isFromUser,
                 isVoice = it.isVoice,
-                voiceDurationSec = it.voiceDurationSec
+                voiceDurationSec = it.voiceDurationSec,
+                voiceFilePath = it.voiceFilePath,
+                subtitle = it.subtitle
             )
         }
         chatHistoryManager.saveMessages(selectedBot.id, dataMessages)
@@ -270,7 +293,8 @@ fun ChatScreen(
         }
     }
 
-    // MiniMax Audio Client for TTS
+    // Deepgram for STT, MiniMax for TTS
+    val deepgramClient = remember { DeepgramAsrClient() }
     val audioClient = remember { MiniMaxAudioClient(context) }
     val mediaPlayer = remember { MediaPlayer() }
     var isTtsPlaying by remember { mutableStateOf(false) }
@@ -341,9 +365,10 @@ fun ChatScreen(
                 selectedBot = selectedBot,
                 onSelect = { bot ->
                     selectedBot = bot
+                    chatbotPreferences.setSelectedBotId(bot.id)  // Save selection
                     showAvatarPicker = false
                     // Reset chat with new bot greeting
-                    messages = listOf(ChatMessage(bot.greeting, isFromUser = false))
+                    messages = listOf(ChatMessage(text = bot.greeting, isFromUser = false))
                 }
             )
         }
@@ -358,12 +383,38 @@ fun ChatScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(vertical = 8.dp)
         ) {
-            items(messages) { message ->
+            items(messages, key = { it.id }) { message ->
                 ChatBubble(
                     message = message,
                     currentUser = currentUser,
                     botAvatar = selectedBot,
                     isDarkMode = isDarkMode,
+                    showSubtitle = message.isSubtitleExpanded,
+                    onToggleSubtitle = {
+                        if (message.subtitle.isNullOrBlank()) {
+                            // No subtitle yet — transcribe on demand
+                            scope.launch {
+                                val audioFile = message.voiceFilePath?.let { java.io.File(it) }
+                                if (audioFile != null && audioFile.exists()) {
+                                    val transcribed = withContext(Dispatchers.IO) {
+                                        deepgramClient.transcribe(audioFile)
+                                    }
+                                    if (transcribed.isNotBlank()) {
+                                        messages = messages.map { msg ->
+                                            if (msg.id == message.id) msg.copy(subtitle = transcribed, isSubtitleExpanded = true)
+                                            else msg
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            // Already have subtitle — just toggle visibility
+                            messages = messages.map { msg ->
+                                if (msg.id == message.id) msg.copy(isSubtitleExpanded = !msg.isSubtitleExpanded)
+                                else msg
+                            }
+                        }
+                    },
                     onTts = { text ->
                         // Check if TTS is already playing
                         if (isTtsPlaying) {
@@ -403,12 +454,17 @@ fun ChatScreen(
                         }
                     },
                     onStt = { voiceMessage ->
-                        // STT now uses Android SpeechRecognizer to directly capture microphone input
-                        // The voiceMessage.voiceFilePath is ignored since we're using live recording
-                        scope.launch {
-                            audioClient.voiceToText { text ->
-                                if (text.isNotBlank()) {
-                                    inputText = text   // fills the text input with the transcription result
+                        val filePath = voiceMessage.voiceFilePath
+                        if (!filePath.isNullOrBlank()) {
+                            scope.launch {
+                                try {
+                                    mediaPlayer.reset()
+                                    mediaPlayer.setDataSource(filePath)
+                                    withContext(Dispatchers.IO) { mediaPlayer.prepare() }
+                                    mediaPlayer.setOnCompletionListener { mediaPlayer.reset() }
+                                    mediaPlayer.start()
+                                } catch (e: Exception) {
+                                    Log.e("VoicePlayback", "Playback failed: ${e.message}")
                                 }
                             }
                         }
@@ -473,84 +529,69 @@ fun ChatScreen(
                                 isRecording = false
                                 val audioFile = audioManager.stopRecording()
                                 if (audioFile != null && audioFile.exists()) {
-                                    // Add voice message to chat
-                                    messages = messages + ChatMessage(
+                                    // Step 1: Add voice message bubble
+                                    val voiceMsg = ChatMessage(
                                         text = "🎤 Voice message",
                                         isFromUser = true,
                                         isVoice = true,
                                         voiceDurationSec = (audioFile.length() / (16000 * 2)).toInt().coerceAtLeast(1),
                                         voiceFilePath = audioFile.absolutePath
                                     )
+                                    messages = messages + voiceMsg
 
-                                    // Real STT → LLM → TTS pipeline
+                                    // Step 2: Auto STT with Deepgram (like WeChat subtitle)
                                     scope.launch {
                                         isLoading = true
-                                        try {
-                                            // Step 1: STT - let user speak again (SpeechRecognizer doesn't replay recorded audio)
-                                            val textDeferred = CompletableDeferred<String>()
-                                            audioClient.voiceToText { text ->
-                                                textDeferred.complete(text)
-                                            }
-                                            val transcribedText = textDeferred.await()
+                                        val transcribedText = withContext(Dispatchers.IO) {
+                                            deepgramClient.transcribe(audioFile)
+                                        }
 
-                                            if (transcribedText.isBlank()) {
-                                                messages = messages + ChatMessage("(Speech not recognized)", isFromUser = false)
-                                                isLoading = false
-                                                return@launch
+                                        if (transcribedText.isNotBlank()) {
+                                            // Update bubble with subtitle (show below bubble)
+                                            messages = messages.map { msg ->
+                                                if (msg.id == voiceMsg.id) msg.copy(subtitle = transcribedText)
+                                                else msg
                                             }
 
-                                            // Step 2: LLM - send to AI
+                                            // Step 3: Send transcribed text to Gemini
                                             val profile = resolveProfile()
-                                            val result = if (personChat != null && profile != null) {
-                                                personChat.sendMessage(p = profile, history = chatHistory, userText = transcribedText)
-                                            } else {
-                                                null
-                                            }
-
-                                            val replyText = result?.replyText ?: "I received your voice message!"
-                                            messages = messages + ChatMessage(replyText, isFromUser = false)
-                                            chatHistory = chatHistory + Message(Role.USER, transcribedText) + Message(Role.ASSISTANT, replyText)
-
-                                            // Step 3: TTS - auto-play AI reply
-                                            val boost = when (currentLanguage) { "zh" -> "Chinese"; "fr" -> "French"; else -> "" }
-                                            var tempFile: File? = null
-                                            try {
-                                                if (isTtsPlaying) {
-                                                    // Skip auto-play if already playing
-                                                } else {
-                                                    isTtsPlaying = true
-                                                    val filePath = audioClient.textToVoice(
-                                                        text = replyText,
-                                                        voiceId = selectedBot.voiceId ?: resolveProfile()?.voiceId ?: "",
-                                                        emotion = result?.emotion ?: "calm",
-                                                        languageBoost = boost
+                                            if (personChat != null && profile != null) {
+                                                try {
+                                                    val result = personChat.sendMessage(
+                                                        p = profile,
+                                                        history = chatHistory,
+                                                        userText = transcribedText
                                                     )
-                                                    tempFile = File(filePath)
-                                                    mediaPlayer.reset()
-                                                    mediaPlayer.setDataSource(filePath)
-                                                    mediaPlayer.prepare()
-                                                    mediaPlayer.setOnCompletionListener {
-                                                        isTtsPlaying = false
-                                                        mediaPlayer.reset()
-                                                        tempFile?.delete()
-                                                    }
-                                                    mediaPlayer.start()
+                                                    // Update chat history with user text + AI response
+                                                    chatHistory = chatHistory + Message(Role.USER, transcribedText) + Message(Role.ASSISTANT, result.replyText)
+                                                    messages = messages + ChatMessage(
+                                                        text = result.replyText,
+                                                        isFromUser = false
+                                                    )
+                                                } catch (e: Exception) {
+                                                    Log.e("ChatScreen", "AI Error: ${e.message}")
+                                                    messages = messages + ChatMessage(
+                                                        text = "Sorry, I encountered an error. Please try again.",
+                                                        isFromUser = false
+                                                    )
                                                 }
-                                            } catch (e: Exception) {
-                                                Log.e("MiniMaxTTS", "Auto-TTS failed: ${e.message}")
-                                                isTtsPlaying = false
-                                                tempFile?.delete()
+                                            } else {
+                                                // Fallback: just show user text and mock reply
+                                                chatHistory = chatHistory + Message(Role.USER, transcribedText)
+                                                messages = messages + ChatMessage(
+                                                    text = "Thanks! I received your voice message: \"$transcribedText\"",
+                                                    isFromUser = false
+                                                )
                                             }
-
-                                        } catch (e: Exception) {
-                                            Log.e("ChatScreen", "Voice flow error: ${e.message}")
-                                            messages = messages + ChatMessage("Sorry, I encountered an error.", isFromUser = false)
+                                        } else {
+                                            Toast.makeText(context, "Speech not recognized", Toast.LENGTH_SHORT).show()
                                         }
                                         isLoading = false
                                     }
                                 }
                             }
                         )
+
                     } else {
                         // Theme-aware colors for text field
                         val textFieldBgColor = if (isDarkMode) Color(0xFF3D3D3D) else Color(0xFFF8F6FF)
@@ -587,7 +628,7 @@ fun ChatScreen(
                             onClick = {
                                 if (inputText.isNotBlank() && !isLoading) {
                                     val userMsg = inputText.trim()
-                                    messages = messages + ChatMessage(userMsg, isFromUser = true)
+                                    messages = messages + ChatMessage(text = userMsg, isFromUser = true)
                                     inputText = ""
                                     isLoading = true
 
@@ -605,7 +646,7 @@ fun ChatScreen(
                                                     userText = userMsg
                                                 )
                                                 messages = messages + ChatMessage(
-                                                    result.replyText,
+                                                    text = result.replyText,
                                                     isFromUser = false
                                                 )
                                                 // Update chat history with AI response
@@ -614,7 +655,7 @@ fun ChatScreen(
                                             } catch (e: Exception) {
                                                 Log.e("ChatScreen", "AI Error: ${e.message}")
                                                 messages = messages + ChatMessage(
-                                                    "Sorry, I encountered an error. Please try again.",
+                                                    text = "Sorry, I encountered an error. Please try again.",
                                                     isFromUser = false
                                                 )
                                             }
@@ -623,7 +664,7 @@ fun ChatScreen(
                                     } else {
                                         // Fallback to mock response if AI not available
                                         messages = messages + ChatMessage(
-                                            "Thanks for your message! I received: \"$userMsg\"",
+                                            text = "Thanks for your message! I received: \"$userMsg\"",
                                             isFromUser = false
                                         )
                                         isLoading = false
@@ -653,6 +694,7 @@ fun ChatScreen(
                         }
                     }
                 }
+
             }
         }
     }
@@ -896,6 +938,8 @@ fun ChatBubble(
     currentUser: FirebaseUser? = null,
     botAvatar: ChatbotAvatar? = null,
     isDarkMode: Boolean = false,
+    showSubtitle: Boolean = false,
+    onToggleSubtitle: (() -> Unit)? = null,
     onTts: ((String) -> Unit)? = null,
     onStt: ((ChatMessage) -> Unit)? = null
 ) {
@@ -934,7 +978,7 @@ fun ChatBubble(
             contentAlignment = alignment
         ) {
         Row(
-            verticalAlignment = Alignment.Bottom,
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
         ) {
             // Bot avatar (left side)
@@ -951,47 +995,96 @@ fun ChatBubble(
                 Spacer(Modifier.width(8.dp))
             }
 
-            // Message bubble
-            Surface(
-                shape = bubbleShape,
-                shadowElevation = 2.dp,
-                modifier = Modifier.widthIn(max = 260.dp)
+            // Message bubble + CC toggle + subtitle — tightly grouped in a Column
+            Column(
+                horizontalAlignment = if (isUser) Alignment.End else Alignment.Start
             ) {
-                Box(
+                Surface(
+                    shape = bubbleShape,
+                    shadowElevation = 2.dp,
                     modifier = Modifier
-                        .background(bubbleColor)
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .widthIn(max = 260.dp)
+                        .then(
+                            if (message.isVoice && onStt != null)
+                                Modifier.clickable { onStt(message) }
+                            else Modifier
+                        )
                 ) {
-                    if (message.isVoice) {
-                        // Voice message display
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                Icons.Filled.Mic,
-                                contentDescription = null,
-                                tint = textColor.copy(alpha = 0.8f),
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            // Waveform bars
-                            VoiceWaveform(
-                                color = textColor.copy(alpha = 0.6f),
-                                modifier = Modifier
-                                    .width((message.voiceDurationSec * 30).coerceIn(40, 120).dp)
-                                    .height(20.dp)
-                            )
-                            Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .background(bubbleColor)
+                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                    ) {
+                        if (message.isVoice) {
+                            // Voice message display
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Filled.Mic,
+                                    contentDescription = null,
+                                    tint = textColor.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                // Waveform bars
+                                VoiceWaveform(
+                                    color = textColor.copy(alpha = 0.6f),
+                                    modifier = Modifier
+                                        .width((message.voiceDurationSec * 30).coerceIn(40, 120).dp)
+                                        .height(20.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "${message.voiceDurationSec}\"",
+                                    color = textColor.copy(alpha = 0.7f),
+                                    fontSize = 13.sp
+                                )
+                            }
+                        } else {
                             Text(
-                                "${message.voiceDurationSec}\"",
-                                color = textColor.copy(alpha = 0.7f),
-                                fontSize = 13.sp
+                                text = message.text,
+                                color = textColor,
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp
                             )
                         }
-                    } else {
+                    }
+                }
+
+                // CC toggle button — shown for all voice messages (transcribes on demand if needed)
+                if (isUser && message.isVoice && onToggleSubtitle != null) {
+                    IconButton(
+                        onClick = { onToggleSubtitle() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (showSubtitle) Icons.Rounded.Subtitles else Icons.Rounded.SubtitlesOff,
+                            contentDescription = if (showSubtitle) "Hide subtitle" else "Show subtitle",
+                            tint = if (showSubtitle) Lavender else Color.Gray.copy(alpha = 0.45f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+
+                // Subtitle — secondary style: small, muted, with subtle background
+                // NOTE: subtitle sits outside the bubble (on chat background), so use
+                // chat-background-contrast color, NOT textColor (which is bubble-contrast)
+                if (message.isVoice && !message.subtitle.isNullOrBlank() && showSubtitle) {
+                    val subtitleTextColor = if (isDarkMode) Color(0xFFBBBBBB) else Color(0xFF555555)
+                    val subtitleBgColor = if (isDarkMode)
+                        Color.White.copy(alpha = 0.08f)
+                    else
+                        Color.Black.copy(alpha = 0.05f)
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 240.dp)
+                            .background(subtitleBgColor, shape = RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
                         Text(
-                            text = message.text,
-                            color = textColor,
-                            fontSize = 15.sp,
-                            lineHeight = 22.sp
+                            text = message.subtitle!!,
+                            color = subtitleTextColor,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
                         )
                     }
                 }
@@ -1039,21 +1132,6 @@ fun ChatBubble(
                     tint = Color.Gray.copy(alpha = 0.6f),
                     modifier = Modifier.size(14.dp)
                 )
-            }
-        }
-        if (isUser && message.isVoice && onStt != null) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                IconButton(
-                    onClick = { onStt(message) },
-                    modifier = Modifier.padding(end = 36.dp).size(28.dp)
-                ) {
-                    Icon(
-                        Icons.Rounded.Subtitles,
-                        contentDescription = "Convert to text",
-                        tint = Peach.copy(alpha = 0.7f),
-                        modifier = Modifier.size(14.dp)
-                    )
-                }
             }
         }
     }

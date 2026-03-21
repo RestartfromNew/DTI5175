@@ -21,14 +21,15 @@ class ChatHistoryManager(private val context: Context) {
     // Save messages for a specific character
     fun saveMessages(characterId: String, messages: List<ChatMessageData>) {
         val trimmedMessages = messages.takeLast(MAX_MESSAGES)
-        // Use \u0001 (SOH) between messages, \u0002 (STX) between fields — never appears in user text
+        // Format: id\u0002text\u0002isFromUser\u0002isVoice\u0002durationSec\u0002voiceFilePath\u0002subtitle
+        // \u0001 separates messages, \u0002 separates fields — control chars never appear in content
         val json = trimmedMessages.joinToString("\u0001") { msg ->
-            "${msg.text}\u0002${msg.isFromUser}\u0002${msg.isVoice}\u0002${msg.voiceDurationSec}"
+            "${msg.id}\u0002${msg.text}\u0002${msg.isFromUser}\u0002${msg.isVoice}" +
+            "\u0002${msg.voiceDurationSec}\u0002${msg.voiceFilePath ?: ""}\u0002${msg.subtitle ?: ""}"
         }
         prefs.edit().putString("messages_$characterId", json).apply()
 
         // Update chat count and timestamp
-        val count = prefs.getInt(KEY_MESSAGE_COUNT, 0) + 1
         prefs.edit()
             .putInt("count_$characterId", trimmedMessages.size)
             .putLong("timestamp_$characterId", System.currentTimeMillis())
@@ -42,18 +43,32 @@ class ChatHistoryManager(private val context: Context) {
         if (json.isEmpty()) return emptyList()
         return json.split("\u0001").mapNotNull { parts ->
             val arr = parts.split("\u0002")
-            if (arr.size >= 2) {
-                try {
+            if (arr.size < 2) return@mapNotNull null
+            try {
+                // New format (7 fields): id|text|isFromUser|isVoice|durationSec|voiceFilePath|subtitle
+                // Old format (4 fields): text|isFromUser|isVoice|durationSec  (no id)
+                if (arr.size >= 7) {
+                    ChatMessageData(
+                        id = arr[0].ifBlank { java.util.UUID.randomUUID().toString() },
+                        text = arr[1],
+                        isFromUser = arr[2].toBoolean(),
+                        isVoice = arr[3].toBoolean(),
+                        voiceDurationSec = arr[4].toIntOrNull() ?: 0,
+                        voiceFilePath = arr[5].ifBlank { null },
+                        subtitle = arr[6].ifBlank { null }
+                    )
+                } else {
+                    // Legacy format — no id/voiceFilePath/subtitle
                     ChatMessageData(
                         text = arr[0],
                         isFromUser = arr[1].toBoolean(),
                         isVoice = arr.getOrNull(2)?.toBoolean() ?: false,
                         voiceDurationSec = arr.getOrNull(3)?.toIntOrNull() ?: 0
                     )
-                } catch (e: Exception) {
-                    null
                 }
-            } else null
+            } catch (e: Exception) {
+                null
+            }
         }
     }
 
@@ -130,10 +145,13 @@ class ChatHistoryManager(private val context: Context) {
  * Data class for chat message serialization
  */
 data class ChatMessageData(
+    val id: String = java.util.UUID.randomUUID().toString(),
     val text: String,
     val isFromUser: Boolean,
     val isVoice: Boolean = false,
-    val voiceDurationSec: Int = 0
+    val voiceDurationSec: Int = 0,
+    val voiceFilePath: String? = null,
+    val subtitle: String? = null
 )
 
 /**

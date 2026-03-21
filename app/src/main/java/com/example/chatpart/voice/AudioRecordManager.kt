@@ -67,8 +67,8 @@ class AudioRecordManager(private val context: Context) {
                 return false
             }
 
-            // Create output file
-            val outputDir = File(context.cacheDir, "voice_messages")
+            // Create output file — use filesDir so OS never auto-cleans it
+            val outputDir = File(context.filesDir, "voice_messages")
             outputDir.mkdirs()
             recordingFile = File(outputDir, "voice_${System.currentTimeMillis()}.wav")
 

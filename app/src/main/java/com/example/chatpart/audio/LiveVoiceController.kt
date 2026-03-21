@@ -13,6 +13,7 @@ import com.example.chatpart.api.MiniMaxAudioClient
 import com.example.chatpart.data.PersonChat
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Profile
+import com.example.chatpart.i18n.Languages
 import com.example.chatpart.screens.LiveVoiceState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -37,8 +38,11 @@ class LiveVoiceController(
     private val context: Context,
     private val brain: PersonChat,
     private val audioClient: MiniMaxAudioClient,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val currentLanguage: String = "en"
 ) {
+    // Helper function for localized strings
+    private fun t(key: String) = Languages.getString(currentLanguage, key)
     companion object {
         private const val TAG = "LiveVoiceController"
         private const val SAMPLE_RATE = 16000
@@ -95,7 +99,7 @@ class LiveVoiceController(
             if (wavFile == null || wavFile.length() < 2000) {
                 Log.w(TAG, "Recording too short or failed (size=${wavFile?.length()})")
                 withContext(Dispatchers.Main) {
-                    onError?.invoke("录音太短，请按住麦克风说话")
+                    onError?.invoke(t("LIVE_RECORD_TOO_SHORT"))
                     onStateChanged?.invoke(LiveVoiceState.IDLE)
                     onAmplitudesUpdated?.invoke(List(32) { 0.1f })
                 }
@@ -113,7 +117,7 @@ class LiveVoiceController(
                 Log.e(TAG, "ASR exception", e)
                 wavFile.delete()
                 withContext(Dispatchers.Main) {
-                    onError?.invoke(e.message ?: "语音识别出错")
+                    onError?.invoke(t("LIVE_SPEECH_NOT_RECOGNIZED"))
                     onStateChanged?.invoke(LiveVoiceState.IDLE)
                     onAmplitudesUpdated?.invoke(List(32) { 0.1f })
                 }
@@ -125,7 +129,7 @@ class LiveVoiceController(
 
             if (finalText.isBlank()) {
                 withContext(Dispatchers.Main) {
-                    onError?.invoke("未能识别语音，请重新按住麦克风说话")
+                    onError?.invoke(t("LIVE_SPEECH_NOT_RECOGNIZED"))
                     onStateChanged?.invoke(LiveVoiceState.IDLE)
                     onAmplitudesUpdated?.invoke(List(32) { 0.1f })
                 }
@@ -178,7 +182,7 @@ class LiveVoiceController(
                 if (e is CancellationException) throw e
                 Log.e(TAG, "Voice chat error", e)
                 withContext(Dispatchers.Main) {
-                    onError?.invoke("出错了：${e.message ?: e.javaClass.simpleName}")
+                    onError?.invoke(t("LIVE_ERROR").replace("{message}", e.message ?: e.javaClass.simpleName))
                     onStateChanged?.invoke(LiveVoiceState.IDLE)
                     onAmplitudesUpdated?.invoke(List(32) { 0.1f })
                 }
@@ -366,7 +370,7 @@ class LiveVoiceController(
                     Log.e(TAG, "MediaPlayer error: what=$what extra=$extra")
                     mediaPlayer?.release()
                     mediaPlayer = null
-                    onError?.invoke("音频播放失败")
+                    onError?.invoke(t("LIVE_PLAYBACK_FAILED"))
                     true
                 }
                 start()
@@ -374,7 +378,7 @@ class LiveVoiceController(
             }
         } catch (e: Exception) {
             Log.e(TAG, "playAudio error: ${e.message}")
-            onError?.invoke("音频播放失败：${e.message}")
+            onError?.invoke(t("LIVE_PLAYBACK_FAILED"))
         }
     }
 }

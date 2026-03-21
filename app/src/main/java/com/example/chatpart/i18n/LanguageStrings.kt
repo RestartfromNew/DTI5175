@@ -167,7 +167,18 @@ object EnglishStrings {
         "LANG_FRENCH" to "French",
         "LANG_JAPANESE" to "日本語",
         "LANG_KOREAN" to "한국어",
-        "LANG_SPANISH" to "Español"
+        "LANG_SPANISH" to "Español",
+
+        // Live Voice
+        "LIVE_HOLD_TO_SPEAK" to "Hold mic to speak",
+        "LIVE_LISTENING" to "Listening...",
+        "LIVE_THINKING" to "Thinking...",
+        "LIVE_SPEAKING" to "Speaking...",
+        "LIVE_RECORD_TOO_SHORT" to "Recording too short, hold mic to speak",
+        "LIVE_SPEECH_NOT_RECOGNIZED" to "Speech not recognized, try again",
+        "LIVE_ERROR" to "Error: {message}",
+        "LIVE_PLAYBACK_FAILED" to "Audio playback failed",
+        "LIVE_MIC_PERMISSION" to "Microphone permission required for voice features"
     )
 }
 
@@ -338,7 +349,18 @@ object FrenchStrings {
         "LANG_FRENCH" to "Français",
         "LANG_JAPANESE" to "日本語",
         "LANG_KOREAN" to "한국어",
-        "LANG_SPANISH" to "Español"
+        "LANG_SPANISH" to "Español",
+
+        // Live Voice
+        "LIVE_HOLD_TO_SPEAK" to "Maintenez le micro pour parler",
+        "LIVE_LISTENING" to "Écoute...",
+        "LIVE_THINKING" to "Réflexion...",
+        "LIVE_SPEAKING" to "Parle...",
+        "LIVE_RECORD_TOO_SHORT" to "Enregistrement trop court, maintenez le micro",
+        "LIVE_SPEECH_NOT_RECOGNIZED" to "Parole non reconnue, réessayez",
+        "LIVE_ERROR" to "Erreur: {message}",
+        "LIVE_PLAYBACK_FAILED" to "Échec de la lecture audio",
+        "LIVE_MIC_PERMISSION" to "Permission du microphone requise"
     )
 }
 
@@ -509,6 +531,17 @@ object ChineseStrings {
         "LANG_FRENCH" to "法语",
         "LANG_JAPANESE" to "日本語",
         "LANG_KOREAN" to "한국어",
-        "LANG_SPANISH" to "Español"
+        "LANG_SPANISH" to "Español",
+
+        // Live Voice
+        "LIVE_HOLD_TO_SPEAK" to "按住麦克风说话",
+        "LIVE_LISTENING" to "正在聆听...",
+        "LIVE_THINKING" to "思考中...",
+        "LIVE_SPEAKING" to "正在回答...",
+        "LIVE_RECORD_TOO_SHORT" to "录音太短，请按住麦克风说话",
+        "LIVE_SPEECH_NOT_RECOGNIZED" to "未能识别语音，请重新按住麦克风说话",
+        "LIVE_ERROR" to "出错了：{message}",
+        "LIVE_PLAYBACK_FAILED" to "音频播放失败",
+        "LIVE_MIC_PERMISSION" to "需要麦克风权限才能使用语音功能，请在系统设置中允许"
     )
 }

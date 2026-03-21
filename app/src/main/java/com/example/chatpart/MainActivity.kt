@@ -30,6 +30,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -81,6 +82,7 @@ import com.example.chatpart.llm.MiniMaxLlmClient
 import com.example.chatpart.llm.EmbeddingLlm
 import com.example.chatpart.memory.InMemoryStore
 import com.example.chatpart.data.PersonChat
+import com.example.chatpart.data.UIPreferences
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
@@ -197,10 +199,30 @@ class MainActivity : ComponentActivity() {
             }
 
             // Helper function to go back to previous page - filter out onboarding pages
-            fun goBack(): Boolean {
+            // targetPage: optional specific destination page (for special navigation like LiveVoice → CharacterList)
+            fun goBack(targetPage: Int? = null): Boolean {
                 if (navigationStack.size <= 1) return false
 
-                // Pop current page
+                // If a specific target is requested, navigate to it directly
+                if (targetPage != null) {
+                    val targetIndex = navigationStack.indexOf(targetPage)
+                    if (targetIndex >= 0) {
+                        // Find the last occurrence of targetPage before the current page
+                        val currentIndex = navigationStack.lastIndexOf(currentPage)
+                        val actualTargetIndex = navigationStack.dropLast(1)
+                            .lastIndexOf(targetPage)
+                            .takeIf { it >= 0 } ?: targetIndex
+                        if (actualTargetIndex >= 0 && actualTargetIndex < navigationStack.size) {
+                            val finalStack = navigationStack.take(actualTargetIndex + 1)
+                            navigationStack = finalStack
+                            currentPage = targetPage
+                            return true
+                        }
+                    }
+                    // Fallback: if target not found in stack, just pop
+                }
+
+                // Default behavior: pop current page
                 val newStack = navigationStack.dropLast(1)
 
                 // Filter out onboarding pages if onboarding is completed
@@ -336,15 +358,24 @@ class MainActivity : ComponentActivity() {
                     }
                     PAGE_LIVE_VOICE -> {
                         currentVoiceCallCharacter?.let { character ->
+                            // ★ 修复：监听页面退出，确保系统返回手势时也能清理状态
+                            DisposableEffect(Unit) {
+                                onDispose {
+                                    // 当 LiveVoiceScreen 退出时（无论是哪种方式退出）
+                                    // 清理 currentVoiceCallCharacter 状态，防止泄漏
+                                    currentVoiceCallCharacter = null
+                                }
+                            }
+
                             LiveVoiceScreen(
                                 character = character,
                                 brain = personChat,
                                 chatHistory = emptyList(),
                                 onEndCall = {
-                                    currentVoiceCallCharacter = null
-                                    goBack()
+                                    goBack(PAGE_CHARACTER_LIST)
                                 },
-                                onMessageAdded = { _, _ -> }
+                                onMessageAdded = { _, _ -> },
+                                currentLanguage = currentLanguage
                             )
                         } ?: run {
                             LaunchedEffect(Unit) { goBack() }
@@ -648,10 +679,18 @@ fun MainTabScreen(
         // 可拖动范围：屏幕宽高减去 padding 和按钮自身尺寸
         val maxDragX = screenWidthPx - buttonSizePx
         val maxDragY = screenHeightPx - topPaddingPx - bottomPaddingPx - buttonSizePx
-        val initialOffsetX = screenWidthPx - buttonSizePx - with(density) { 16.dp.toPx() }
+        val defaultOffsetX = screenWidthPx - buttonSizePx - with(density) { 16.dp.toPx() }
+        val defaultOffsetY = with(density) { 16.dp.toPx() }
+
+        // 从 SharedPreferences 恢复保存的位置
+        val uiPreferences = remember { UIPreferences(context) }
+        val savedOffsetX = uiPreferences.getCallButtonOffsetX()
+        val savedOffsetY = uiPreferences.getCallButtonOffsetY()
+        val initialOffsetX = if (savedOffsetX >= 0) savedOffsetX.coerceIn(0f, maxDragX) else defaultOffsetX
+        val initialOffsetY = if (savedOffsetY >= 0) savedOffsetY.coerceIn(0f, maxDragY) else defaultOffsetY
 
         var buttonOffsetX by remember { mutableStateOf(initialOffsetX) }
-        var buttonOffsetY by remember { mutableStateOf(with(density) { 16.dp.toPx() }) }
+        var buttonOffsetY by remember { mutableStateOf(initialOffsetY) }
         val haptic = LocalHapticFeedback.current
 
         Box(modifier = Modifier.padding(innerPadding)) {
@@ -752,6 +791,8 @@ fun MainTabScreen(
                                 change.consume()
                                 buttonOffsetX = (buttonOffsetX + dragAmount.x).coerceIn(0f, maxDragX)
                                 buttonOffsetY = (buttonOffsetY + dragAmount.y).coerceIn(0f, maxDragY)
+                                // 保存位置到 SharedPreferences（异步，不会阻塞 UI）
+                                uiPreferences.setCallButtonOffset(buttonOffsetX, buttonOffsetY)
                             }
                         )
                     }
