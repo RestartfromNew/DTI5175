@@ -165,6 +165,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             var isDarkMode by remember { mutableStateOf(false) }
+            // Hoist selectedTab here so it survives navigation away and back
+            // (if kept inside MainTabScreen, it resets to 0/Chat every time you return)
+            var mainSelectedTab by remember { mutableIntStateOf(0) }
             val context = LocalContext.current
             val manager = remember { OnboardingManager(context) }
             val authManager = remember { GoogleAuthManager(context) }
@@ -249,24 +252,34 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Character storage
-            val characterStorage = remember { CharacterStorage(context) }
-            var characters by remember { mutableStateOf(characterStorage.loadCharacters()) }
-            var selectedCharacter by remember { mutableStateOf(characterStorage.getSelectedCharacter() ?: defaultProfile) }
-            var editingCharacter by remember { mutableStateOf<Profile?>(null) }
-
-            // Track auth state
+            // Track auth state — declared FIRST so CharacterStorage can use uid
             var currentUser by remember { mutableStateOf(authManager.currentUser) }
+
+            // Character storage — keyed on uid so each account has isolated data.
+            // remember(currentUser?.uid) recreates the storage when the user changes.
+            val characterStorage = remember(currentUser?.uid) {
+                CharacterStorage(context, currentUser?.uid ?: "")
+            }
+            // Reload characters whenever the storage switches to a different user
+            var characters by remember(currentUser?.uid) {
+                mutableStateOf(characterStorage.loadCharacters())
+            }
+            var selectedCharacter by remember(currentUser?.uid) {
+                mutableStateOf(characterStorage.getSelectedCharacter() ?: defaultProfile)
+            }
+            var editingCharacter by remember { mutableStateOf<Profile?>(null) }
 
             // UserVoiceManager for Firestore operations (created when user signs in)
             var userVoiceManager by remember { mutableStateOf<UserVoiceManager?>(null) }
 
-            // Initialize UserVoiceManager when user signs in
+            // Initialize UserVoiceManager when user signs in.
+            // Also clear it on sign-out so old uid is never reused.
             LaunchedEffect(currentUser) {
-                currentUser?.let { user ->
-                    userVoiceManager = UserVoiceManager(user.uid)
-                    // Ensure user document exists in Firestore
-                    userVoiceManager?.ensureUserExists(user.email ?: "")
+                if (currentUser != null) {
+                    userVoiceManager = UserVoiceManager(currentUser!!.uid)
+                    userVoiceManager?.ensureUserExists(currentUser!!.email ?: "")
+                } else {
+                    userVoiceManager = null
                 }
             }
 
@@ -348,7 +361,7 @@ class MainActivity : ComponentActivity() {
                                 selectedCharacter = characterStorage.getSelectedCharacter() ?: defaultProfile
                             },
                             onBack = {
-                                navigateTo(PAGE_MAIN)
+                                goBack()
                             },
                             onVoiceCall = { profile ->
                                 currentVoiceCallCharacter = profile
@@ -495,10 +508,13 @@ class MainActivity : ComponentActivity() {
                             goBack()
                         } else {
                             val manager = userVoiceManager!!
+                            // SECURITY: Pass uid for account isolation in voice_id
+                            val currentUid = currentUser?.uid ?: ""
                             VoiceCloneScreen(
                             isDarkMode = isDarkMode,
                             characterName = pendingVoiceCloneProfile?.name ?: "Character",
                             characterId = pendingVoiceCloneProfile?.id ?: "unknown",
+                            uid = currentUid,
                             userVoiceManager = manager,
                             onVoiceCloned = { voiceId ->
                                 val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
@@ -556,7 +572,7 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_VOICE_CLONE)
                             },
                             onBack = {
-                                navigateTo(PAGE_MAIN)
+                                goBack()
                             },
                             onVoicesChanged = {
                                 characters = characterStorage.loadCharacters()
@@ -591,7 +607,9 @@ class MainActivity : ComponentActivity() {
                             onNavigateToLiveVoice = {
                                 currentVoiceCallCharacter = selectedCharacter
                                 navigateTo(PAGE_LIVE_VOICE)
-                            }
+                            },
+                            selectedTab = mainSelectedTab,
+                            onSelectedTabChange = { mainSelectedTab = it }
                         )
                     }
                 }
@@ -614,7 +632,9 @@ fun MainTabScreen(
     onSelectCharacter: (Profile) -> Unit = {},
     currentLanguage: String = "zh",
     onLanguageChange: (String) -> Unit = {},
-    onNavigateToLiveVoice: () -> Unit = {}
+    onNavigateToLiveVoice: () -> Unit = {},
+    selectedTab: Int = 0,
+    onSelectedTabChange: (Int) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -625,7 +645,8 @@ fun MainTabScreen(
         TabItem(t("HISTORY"), Icons.Filled.History, Icons.Outlined.History),
         TabItem(t("SETTINGS"), Icons.Filled.Settings, Icons.Outlined.Settings)
     )
-    var selectedTab by remember { mutableIntStateOf(0) }
+    // selectedTab is hoisted to MainActivity to survive navigation away/back
+    // Do NOT use local remember here - it would reset to 0 (Chat) every time we return
     var chatTargetBotId by remember { mutableStateOf<String?>(null) }
 
     // Theme-aware colors
@@ -641,7 +662,7 @@ fun MainTabScreen(
                 tabs.forEachIndexed { index, tab ->
                     NavigationBarItem(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
+                        onClick = { onSelectedTabChange(index) },
                         icon = {
                             Icon(
                                 imageVector = if (selectedTab == index) tab.selectedIcon else tab.unselectedIcon,
@@ -761,7 +782,7 @@ fun MainTabScreen(
                             }
                         }
                         // Switch to Chat tab
-                        selectedTab = 0
+                        onSelectedTabChange(0)
                     }
                 )
                 2 -> SettingsScreen(

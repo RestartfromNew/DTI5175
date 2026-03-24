@@ -56,6 +56,7 @@ fun VoiceCloneScreen(
     isDarkMode: Boolean = false,
     characterName: String,
     characterId: String,
+    uid: String, // Firebase user ID for account isolation
     userVoiceManager: UserVoiceManager,
     onVoiceCloned: (voiceId: String) -> Unit,
     onSkip: () -> Unit,
@@ -540,10 +541,11 @@ fun VoiceCloneScreen(
                         isCloning = true
                         cloneError = null
                         // Launch cloning in background
-                        val manager = MiniMaxVoiceCloneManager(context)
+                        val minimaxManager = MiniMaxVoiceCloneManager(context)
                         scope.launch {
                             if (recordedFile != null) {
-                                val result = manager.cloneVoice(recordedFile!!, characterName)
+                                // SECURITY: Pass uid for account isolation in voice_id
+                                val result = minimaxManager.cloneVoice(recordedFile!!, characterName, uid)
                                 result.onSuccess { voiceId ->
                                     // Prepare voice data for Firestore
                                     val voice = ClonedVoice(
@@ -565,6 +567,12 @@ fun VoiceCloneScreen(
                                         .onFailure { firestoreError ->
                                             Log.e("VoiceClone", "Firestore save failed: ${firestoreError.message}")
                                             isCloning = false
+
+                                            // COMPENSATION (P4): MiniMax clone succeeded but Firestore failed
+                                            // Delete the voice from MiniMax to prevent orphaned voices
+                                            Log.w("VoiceClone", "Rolling back MiniMax voice due to Firestore failure: $voiceId")
+                                            minimaxManager.deleteVoice(voiceId)
+
                                             // Show error with retry option
                                             val errorMsg = userVoiceManager.getUserFriendlyErrorMessage(firestoreError)
                                             cloneError = "$errorMsg (Voice cloned but not saved)"

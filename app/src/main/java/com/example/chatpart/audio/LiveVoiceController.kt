@@ -192,12 +192,29 @@ class LiveVoiceController(
 
     /**
      * Called when user releases mic button.
-     * Signals the recording loop to stop.
+     * Signals the recording loop to stop, then processes the audio.
      */
     fun stopListening() {
         if (isReleased) return
         Log.d(TAG, "Stop recording signal sent")
         isRecording = false
+    }
+
+    /**
+     * Called when user swipes mic button to the trash icon (cancel zone).
+     * Stops recording WITHOUT processing the audio — discards the take entirely.
+     */
+    fun cancelListening() {
+        if (isReleased) return
+        Log.d(TAG, "Cancel recording — audio discarded")
+        isRecording = false
+        currentJob?.cancel()
+        currentJob = null
+        scope.launch(Dispatchers.Main) {
+            onStateChanged?.invoke(LiveVoiceState.IDLE)
+            onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+            onUserCaptionUpdated?.invoke("")
+        }
     }
 
     fun release() {

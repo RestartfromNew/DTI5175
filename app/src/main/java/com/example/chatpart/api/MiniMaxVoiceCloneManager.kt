@@ -58,15 +58,19 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
      * Full voice clone flow. Returns Result<voiceId> to be stored on Profile.
      * On failure, returns Result.failure with a descriptive error message.
      *
+     * SECURITY: voice_id includes uid prefix for account isolation.
+     * Format: cp{uid_prefix}_{characterId}_{uuid}
+     *
      * @param audioFile The recorded audio file (WAV, MP3, or M4A)
      * @param characterId The character ID to build the voice_id from
+     * @param uid The Firebase user ID for account isolation
      * @return Result containing the voice_id on success, or an error on failure
      */
-    suspend fun cloneVoice(audioFile: File, characterId: String): Result<String> =
+    suspend fun cloneVoice(audioFile: File, characterId: String, uid: String): Result<String> =
         withContext(Dispatchers.IO) {
             runCatching {
                 val fileId = uploadAudioFile(audioFile)
-                val safeVoiceId = buildVoiceId(characterId)
+                val safeVoiceId = buildVoiceId(uid, characterId)
                 registerVoiceClone(fileId = fileId, voiceId = safeVoiceId)
                 safeVoiceId
             }
@@ -173,9 +177,13 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
     }
 
     /**
-     * Builds a valid MiniMax voice_id from a character ID.
+     * Builds a valid MiniMax voice_id from a character ID and user ID.
      *
-     * Ensures uniqueness by appending a UUID suffix to avoid duplicates.
+     * SECURITY: Includes uid prefix to isolate voices per Firebase account.
+     * This prevents users from seeing/deleting other users' voices.
+     *
+     * Format: cp{uid_prefix}_{characterId}_{uuid}
+     * Example: uid="user123", characterId="Alex" → "cpuser123_Alex_a1b2c3d4"
      *
      * Constraints:
      * - Length: 8–256 characters
@@ -184,8 +192,62 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
      * - Cannot end with - or _
      * - Must be globally unique in your MiniMax account
      *
-     * Example: characterId="Alex" → "cpAlex_a1b2c3d4"
+     * @param uid Firebase user ID (first 8 chars used as prefix)
+     * @param characterId The character ID
+     * @return A unique voice_id containing uid for account isolation
      */
+    fun buildVoiceId(uid: String, characterId: String): String {
+        // Use first 8 chars of uid for isolation, sanitize to be MiniMax-compliant
+        val uidPrefix = uid.take(8)
+            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            .take(8)
+            .lowercase()
+            .ifEmpty { "user" }
+
+        val sanitizedChar = characterId
+            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+            .take(12)
+
+        val uniqueSuffix = UUID.randomUUID().toString()
+            .replace("-", "")
+            .take(8)
+            .lowercase()
+
+        return "cp${uidPrefix}_${sanitizedChar}_$uniqueSuffix"
+    }
+
+    /**
+     * Extracts the uid prefix from a voice_id.
+     * Used for ownership verification before deletion.
+     *
+     * Format: cp{uid_prefix}_{characterId}_{uuid}
+     * Example: "cpuser123_Alex_a1b2c3d4" → "user123"
+     *
+     * @param voiceId The voice_id to parse
+     * @return The uid prefix, or null if invalid format
+     */
+    fun extractUidPrefix(voiceId: String): String? {
+        // Expected format: cp{uid_prefix}_{...}
+        if (!voiceId.startsWith("cp")) return null
+        val remaining = voiceId.removePrefix("cp")
+        // Split by underscore and take first part (uid prefix)
+        val parts = remaining.split("_")
+        return parts.firstOrNull()
+    }
+
+    /**
+     * Checks if a voice_id belongs to a specific user.
+     * Uses the uid prefix in the voice_id for verification.
+     *
+     * @param voiceId The voice_id to check
+     * @param uid The Firebase user ID to verify against
+     * @return true if the voice belongs to this user, false otherwise
+     */
+    fun isVoiceOwnedByUser(voiceId: String, uid: String): Boolean {
+        val prefix = extractUidPrefix(voiceId) ?: return false
+        return uid.startsWith(prefix) || prefix == uid.take(8)
+    }
+
     /**
      * Delete a cloned voice from MiniMax
      *
@@ -214,16 +276,5 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
                 throw IOException("delete_voice failed (code $statusCode): $errorMsg")
             }
         }
-    }
-
-    fun buildVoiceId(characterId: String): String {
-        val sanitized = characterId
-            .filter { it.isLetterOrDigit() || it == '-' || it == '_' }
-            .take(15)
-        val uniqueSuffix = UUID.randomUUID().toString()
-            .replace("-", "")
-            .take(8)
-            .lowercase()
-        return "cp${sanitized}_$uniqueSuffix"
     }
 }

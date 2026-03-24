@@ -47,6 +47,11 @@ service cloud.firestore {
     // 辅助函数
     // ============================================
 
+    // 获取当前时间戳（毫秒）
+    function currentTime() {
+      return request.time.toMillis();
+    }
+
     // 验证 voices 数组中每个元素的结构
     // Firestore 规则中，使用条件表达式来验证每个索引的元素
     function validateVoices(voices) {
@@ -65,14 +70,26 @@ service cloud.firestore {
     }
 
     // 验证单个 voice 对象的结构
+    // SECURITY (P1): 验证 voiceId 格式包含用户标识
     function isValidVoice(voice) {
       return voice is map
-        && 'id' in voice && voice.id is string && voice.id.size() > 0
-        && 'voiceId' in voice && voice.voiceId is string && voice.voiceId.size() > 0
-        && 'characterId' in voice && voice.characterId is string
-        && 'characterName' in voice && voice.characterName is string
-        && 'createdAt' in voice && voice.createdAt is int && voice.createdAt > 0
-        && 'lastUsedAt' in voice && voice.lastUsedAt is int && voice.lastUsedAt > 0;
+        && 'id' in voice && voice.id is string && voice.id.size() > 0 && voice.id.size() <= 100
+        && 'voiceId' in voice && voice.voiceId is string && isValidVoiceId(voice.voiceId)
+        && 'characterId' in voice && voice.characterId is string && voice.characterId.size() <= 100
+        && 'characterName' in voice && voice.characterName is string && voice.characterName.size() <= 100
+        && 'createdAt' in voice && voice.createdAt is int && voice.createdAt > 0 && voice.createdAt <= currentTime()
+        && 'lastUsedAt' in voice && voice.lastUsedAt is int && voice.lastUsedAt > 0 && voice.lastUsedAt <= currentTime();
+    }
+
+    // SECURITY (P1): 验证 voiceId 格式
+    // 新格式: cp{uid_prefix}_{characterId}_{uuid}
+    // 确保 voiceId 符合 MiniMax 要求且包含用户标识
+    function isValidVoiceId(voiceId) {
+      return voiceId.size() >= 8
+        && voiceId.size() <= 256
+        && voiceId[0] >= 'a' && voiceId[0] <= 'z'  // 必须以小写字母开头
+        && voiceId[0] == 'c' && voiceId[1] == 'p'  // 必须以 "cp" 开头
+        && voiceId.matches('^[a-z][a-z0-9]*(_[a-z0-9]+)*$');  // 格式: 小写字母/数字，可含下划线
     }
   }
 }

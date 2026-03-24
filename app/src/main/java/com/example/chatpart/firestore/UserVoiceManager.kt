@@ -7,6 +7,7 @@ import android.util.Log
 import com.example.chatpart.data.ClonedVoice
 import com.example.chatpart.data.SlotStatus
 import com.example.chatpart.data.UserVoiceData
+import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.toObject
@@ -35,8 +36,13 @@ sealed class FirestoreError(message: String, cause: Throwable? = null) : Excepti
  * 用户声音数据管理器
  * 处理所有与用户声音相关的 Firestore 操作
  * 包含重试逻辑和全面的错误处理
+ *
+ * SECURITY:
+ * - 使用 Transaction 确保操作的原子性
+ * - 使用 FieldValue.increment() 避免客户端信任问题
+ * - uid 用于账户隔离和所有权验证
  */
-class UserVoiceManager(private val uid: String) {
+class UserVoiceManager(val uid: String) { // SECURITY: uid is public for ownership verification
 
     companion object {
         private const val TAG = "UserVoiceManager"
@@ -231,105 +237,115 @@ class UserVoiceManager(private val uid: String) {
 
     /**
      * 添加克隆声音
-     * 同时更新 slotUsed 计数
-     * 包含重试逻辑，网络不稳定时会自动重试
+     * SECURITY (P2): 使用原子操作防止竞态条件
+     * - 使用 Transaction 确保 slot 检查和添加是原子的
+     * - 使用 FieldValue.increment() 避免客户端计算的 slotUsed
+     * - 使用 FieldValue.arrayUnion() 添加 voice 而非读取-修改-写入
      */
     suspend fun addClonedVoice(voice: ClonedVoice): Result<Unit> {
-        // 1. 先检查 slot（不重试，快速检查）
-        val status = getSlotStatusQuick()
-        Log.d(TAG, "addClonedVoice: slot status = $status, used=${status.used}, limit=${status.limit}")
-        if (status.isFull) {
-            return Result.failure(FirestoreError.SlotFullError())
-        }
-
-        // 2. 获取当前 voices 列表并添加新 voice（带重试）
         return withRetry(
             maxRetries = MAX_RETRIES,
             operationName = "addClonedVoice"
         ) {
-            Log.d(TAG, "addClonedVoice: updating Firestore with voiceId=${voice.voiceId}, id=${voice.id}")
+            Log.d(TAG, "addClonedVoice: using atomic transaction for voiceId=${voice.voiceId}, id=${voice.id}")
 
-            // 获取当前数据
-            val doc = userDoc.get().await()
-            val userData = doc.toObject<UserVoiceData>()
-                ?: throw FirebaseFirestoreException(
-                    "User document not found",
-                    FirebaseFirestoreException.Code.NOT_FOUND
+            // 使用 Firestore Transaction 进行原子性操作
+            FirebaseFirestore.getInstance().runTransaction { transaction ->
+                val snapshot = transaction.get(userDoc)
+                val userData = snapshot.toObject<UserVoiceData>()
+                    ?: throw FirebaseFirestoreException(
+                        "User document not found",
+                        FirebaseFirestoreException.Code.NOT_FOUND
+                    )
+
+                // 在 Transaction 内检查 slot（原子性）
+                if (userData.slotUsed >= userData.slotLimit) {
+                    throw FirebaseFirestoreException(
+                        "Voice slot is full",
+                        FirebaseFirestoreException.Code.FAILED_PRECONDITION
+                    )
+                }
+
+                // 使用 arrayUnion 添加 voice（原子操作）
+                // 使用 increment 更新 slotUsed（服务端计算，避免客户端信任问题）
+                transaction.update(
+                    userDoc,
+                    "voices", FieldValue.arrayUnion(voice),
+                    "slotUsed", FieldValue.increment(1),
+                    "updatedAt", System.currentTimeMillis()
                 )
 
-            // 构建新的 voices 列表
-            val updatedVoices = userData.voices + voice
+                Log.d(TAG, "addClonedVoice: transaction success for voiceId=${voice.voiceId}")
+                null
+            }.await()
 
-            // 一次性更新 voices 和 slotUsed
-            userDoc.update(
-                "voices", updatedVoices,
-                "slotUsed", userData.slotUsed + 1,
-                "updatedAt", System.currentTimeMillis()
-            ).await()
-
-            Log.d(TAG, "addClonedVoice: success for voiceId=${voice.voiceId}, total voices=${updatedVoices.size}")
+            Log.d(TAG, "addClonedVoice: success for voiceId=${voice.voiceId}")
         }.mapCatching { }
           .recoverCatching { e ->
             Log.e(TAG, "addClonedVoice: failed with ${e::class.simpleName} - ${e.message}")
+            // 如果是 slot 满的错误，返回特定的 SlotFullError
+            if (e is FirebaseFirestoreException && e.code == FirebaseFirestoreException.Code.FAILED_PRECONDITION) {
+                return Result.failure(FirestoreError.SlotFullError())
+            }
             throw parseFirestoreException(e)
           }
     }
 
     /**
      * 删除克隆声音
-     * 同时更新 slotUsed 计数
-     * 包含重试逻辑，网络不稳定时会自动重试
+     * SECURITY (P2): 使用原子操作防止竞态条件
+     * - 使用 Transaction 确保声音存在检查和删除是原子的
+     * - 使用 FieldValue.arrayRemove() 和 FieldValue.increment(-1) 进行原子更新
      */
     suspend fun deleteClonedVoice(voiceId: String): Result<Unit> {
-        // 1. 获取当前数据并找到要删除的声音（带重试）
-        val (updatedVoices, newSlotUsed) = withRetry(
-            maxRetries = MAX_RETRIES,
-            operationName = "deleteClonedVoice-find"
-        ) {
-            val doc = userDoc.get().await()
-            val userData = doc.toObject<UserVoiceData>()
-                ?: throw FirebaseFirestoreException(
-                    "User not found",
-                    FirebaseFirestoreException.Code.NOT_FOUND
-                )
-
-            // 检查声音是否存在
-            val voiceExists = userData.voices.any { it.voiceId == voiceId }
-            if (!voiceExists) {
-                throw FirebaseFirestoreException(
-                    "Voice not found: $voiceId",
-                    FirebaseFirestoreException.Code.NOT_FOUND
-                )
-            }
-
-            // 过滤掉要删除的声音
-            val filteredVoices = userData.voices.filter { it.voiceId != voiceId }
-            val newSlotUsed = maxOf(0, userData.slotUsed - 1)
-
-            Pair(filteredVoices, newSlotUsed)
-        }.getOrElse { e ->
-            Log.e(TAG, "deleteClonedVoice - find failed: ${e.message}")
-            return Result.failure(parseFirestoreException(e))
-        }
-
-        // 2. 一次性更新 voices 和 slotUsed（带重试）
         return withRetry(
             maxRetries = MAX_RETRIES,
-            operationName = "deleteClonedVoice-delete"
+            operationName = "deleteClonedVoice"
         ) {
-            userDoc.update(
-                "voices", updatedVoices,
-                "slotUsed", newSlotUsed,
-                "updatedAt", System.currentTimeMillis()
-            ).await()
-            Log.d(TAG, "Deleted voice: $voiceId from user: $uid, remaining voices=${updatedVoices.size}")
-            Unit
-        }.recoverCatching { e ->
-            Log.e(TAG, "deleteClonedVoice - delete failed: ${e::class.simpleName} - ${e.message}")
+            Log.d(TAG, "deleteClonedVoice: using atomic transaction for voiceId=$voiceId")
+
+            // 使用 Firestore Transaction 进行原子性操作
+            FirebaseFirestore.getInstance().runTransaction { transaction ->
+                val snapshot = transaction.get(userDoc)
+                val userData = snapshot.toObject<UserVoiceData>()
+                    ?: throw FirebaseFirestoreException(
+                        "User not found",
+                        FirebaseFirestoreException.Code.NOT_FOUND
+                    )
+
+                // 在 Transaction 内检查声音是否存在（原子性）
+                val voiceExists = userData.voices.any { it.voiceId == voiceId }
+                if (!voiceExists) {
+                    throw FirebaseFirestoreException(
+                        "Voice not found: $voiceId",
+                        FirebaseFirestoreException.Code.NOT_FOUND
+                    )
+                }
+
+                // ⚠️ DO NOT use FieldValue.arrayRemove(voiceToDelete) here.
+                // arrayRemove requires deep-equality object matching. Firestore
+                // deserialization can produce slightly different objects (Long vs Int,
+                // missing fields, etc.) causing arrayRemove to silently do nothing.
+                //
+                // Instead: filter the list manually and overwrite the whole field.
+                val updatedVoices = userData.voices.filter { it.voiceId != voiceId }
+                transaction.update(
+                    userDoc,
+                    "voices", updatedVoices,
+                    "slotUsed", FieldValue.increment(-1),
+                    "updatedAt", System.currentTimeMillis()
+                )
+
+                Log.d(TAG, "deleteClonedVoice: transaction success for voiceId=$voiceId")
+                Unit
+            }.await()
+
+            Log.d(TAG, "deleteClonedVoice: success for voiceId=$voiceId")
+        }.mapCatching { }
+          .recoverCatching { e ->
+            Log.e(TAG, "deleteClonedVoice failed: ${e::class.simpleName} - ${e.message}")
             throw parseFirestoreException(e)
-        }.onFailure { e ->
-            Log.e(TAG, "deleteClonedVoice failed: ${e.message}")
-        }
+          }
     }
 
     /**

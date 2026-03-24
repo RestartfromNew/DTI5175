@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -36,12 +37,32 @@ import androidx.compose.material.icons.rounded.CallEnd
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.Videocam
+import androidx.compose.material.icons.rounded.VideocamOff
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.Preview as CameraPreview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import android.net.Uri
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+import com.example.chatpart.api.BotVideoSource
+import com.example.chatpart.api.SdpAdapter
+import com.example.chatpart.api.WebRTCManager
+import org.webrtc.EglBase
+import org.webrtc.SurfaceViewRenderer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -151,6 +172,31 @@ fun LiveVoiceScreen(
     // 错误提示
     var errorMessage by remember { mutableStateOf("") }
 
+    // 挂断确认 dialog
+    var showEndCallDialog by remember { mutableStateOf(false) }
+
+    // 视频开关 — None=能量球, LocalSample=占位视频, WebRTC=真实推流
+    var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.None) }
+    var isUserCamOn by remember { mutableStateOf(false) }
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            isUserCamOn = true
+            botVideoSource = BotVideoSource.LocalSample // 占位视频先显示
+            // TODO: 替换为真实地址时改成:
+            // botVideoSource = BotVideoSource.WebRTC("ws://your-gpu-server/webrtc")
+        }
+    }
+
+    // 默认角色名称跟随语言设置
+    val displayName = when (character.id) {
+        "char_001" -> t("DEFAULT_ASSISTANT")
+        "char_002" -> t("DEFAULT_TEACHER")
+        "char_003" -> t("DEFAULT_CODER")
+        else -> character.name
+    }
+
     // 派生状态
     val isUserSpeaking = voiceState == LiveVoiceState.USER_SPEAKING
     val isAISpeaking = voiceState == LiveVoiceState.AI_SPEAKING
@@ -239,17 +285,29 @@ fun LiveVoiceScreen(
 
         // 2. 顶部状态栏
         TopStatusBar(
-            characterName = character.name,
+            characterName = displayName,
             duration = callDuration,
             onSettingsClick = { /* TODO: 打开设置 */ },
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
-        // 3. 中央能量球（AI 思考/说话状态）
-        CentralEnergyBall(
-            isAISpeaking = isAISpeaking,
-            modifier = Modifier.align(Alignment.Center)
-        )
+        // 3. 中央区域 — 有视频时显示 bot 视频，否则显示能量球
+        if (botVideoSource == BotVideoSource.None) {
+            CentralEnergyBall(
+                isAISpeaking = isAISpeaking,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else {
+            BotVideoArea(
+                source = botVideoSource,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .height(360.dp)
+                    .clip(RoundedCornerShape(20.dp))
+            )
+        }
 
         // 4. 字幕区域（能量球下方）
         CaptionArea(
@@ -275,10 +333,10 @@ fun LiveVoiceScreen(
 
         // 6. 状态提示文字（麦克风按钮上方）
         val statusHint = when (voiceState) {
-            LiveVoiceState.IDLE -> t("LIVE_HOLD_TO_SPEAK")
+            LiveVoiceState.IDLE         -> t("LIVE_HOLD_TO_SPEAK")
             LiveVoiceState.USER_SPEAKING -> t("LIVE_LISTENING")
-            LiveVoiceState.PROCESSING -> t("LIVE_THINKING")
-            LiveVoiceState.AI_SPEAKING -> t("LIVE_SPEAKING")
+            LiveVoiceState.PROCESSING   -> t("LIVE_THINKING")
+            LiveVoiceState.AI_SPEAKING  -> t("LIVE_SPEAKING")
         }
         Column(
             modifier = Modifier
@@ -307,6 +365,62 @@ fun LiveVoiceScreen(
             )
         }
 
+        // 8. 挂断确认 dialog
+        if (showEndCallDialog) {
+            AlertDialog(
+                onDismissRequest = { showEndCallDialog = false },
+                title = {
+                    Text(
+                        text = t("LIVE_END_CALL_TITLE"),
+                        color = MoonlightWhite,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                },
+                text = {
+                    Text(
+                        text = t("LIVE_END_CALL_CONFIRM"),
+                        color = StardustGray
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showEndCallDialog = false
+                            controller.release()
+                            onEndCall()
+                        }
+                    ) {
+                        Text(
+                            text = t("LIVE_END_CALL_YES"),
+                            color = Color(0xFFFF4757)
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showEndCallDialog = false }) {
+                        Text(
+                            text = t("LIVE_END_CALL_NO"),
+                            color = ElectricPurple
+                        )
+                    }
+                },
+                containerColor = Color(0xFF1A1A2E),
+                titleContentColor = MoonlightWhite,
+                textContentColor = StardustGray
+            )
+        }
+
+        // 用户摄像头预览（右上角，视频开启时显示）
+        if (isUserCamOn) {
+            CameraPreviewView(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 16.dp, end = 16.dp)
+                    .size(width = 120.dp, height = 160.dp)
+                    .clip(RoundedCornerShape(12.dp))
+            )
+        }
+
         // 7. 底部麦克风按钮
         BottomMicControls(
             isMicPressed = isMicPressed,
@@ -332,8 +446,25 @@ fun LiveVoiceScreen(
                 }
             },
             onEndCall = {
-                controller.release()
-                onEndCall()
+                showEndCallDialog = true
+            },
+            isVideoOn = botVideoSource != BotVideoSource.None,
+            onVideoToggle = {
+                if (botVideoSource == BotVideoSource.None) {
+                    val hasCamera = ContextCompat.checkSelfPermission(
+                        context, Manifest.permission.CAMERA
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (hasCamera) {
+                        isUserCamOn = true
+                        botVideoSource = BotVideoSource.LocalSample
+                        // TODO: botVideoSource = BotVideoSource.WebRTC("ws://your-gpu-server/webrtc")
+                    } else {
+                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                    }
+                } else {
+                    isUserCamOn = false
+                    botVideoSource = BotVideoSource.None
+                }
             },
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -799,7 +930,7 @@ fun LiquidVoiceWave(
 }
 
 /**
- * 底部麦克风控制按钮
+ * 底部麦克风控制按钮（LiveVoice 专用，简单的按住说话）
  */
 @Composable
 fun BottomMicControls(
@@ -808,6 +939,8 @@ fun BottomMicControls(
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onEndCall: () -> Unit,
+    isVideoOn: Boolean = false,
+    onVideoToggle: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -819,7 +952,10 @@ fun BottomMicControls(
     ) {
         // 结束通话按钮
         FilledIconButton(
-            onClick = onEndCall,
+            onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onEndCall()
+            },
             modifier = Modifier.size(64.dp),
             shape = CircleShape,
             colors = IconButtonDefaults.filledIconButtonColors(
@@ -834,19 +970,14 @@ fun BottomMicControls(
             )
         }
 
-        // 麦克风按钮（长按说话）
+        // 麦克风按钮（按住说话）
         Box(
             modifier = Modifier
                 .size(88.dp)
                 .clip(CircleShape)
                 .background(
                     brush = if (isUserSpeaking) {
-                        Brush.radialGradient(
-                            colors = listOf(
-                                FlowGreen,
-                                FlowGreen.copy(alpha = 0.6f)
-                            )
-                        )
+                        Brush.radialGradient(listOf(FlowGreen, FlowGreen.copy(alpha = 0.6f)))
                     } else {
                         FlowGradient
                     }
@@ -864,7 +995,6 @@ fun BottomMicControls(
                 },
             contentAlignment = Alignment.Center
         ) {
-            // 内圈
             Surface(
                 modifier = Modifier.size(72.dp),
                 shape = CircleShape,
@@ -881,7 +1011,141 @@ fun BottomMicControls(
             }
         }
 
-        // 占位（平衡布局）
-        Spacer(Modifier.size(64.dp))
+        // 视频切换按钮
+        VideoToggleButton(
+            isVideoOn = isVideoOn,
+            onClick = onVideoToggle
+        )
     }
+}
+
+@Composable
+fun VideoToggleButton(
+    isVideoOn: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val bgColor by animateColorAsState(
+        targetValue = if (isVideoOn) Color(0xFF1565C0) else Color(0xFF2A2A2A),
+        label = "videoBg"
+    )
+    val iconTint by animateColorAsState(
+        targetValue = if (isVideoOn) Color.White else Color(0xFF888888),
+        label = "videoTint"
+    )
+    FilledIconButton(
+        onClick = onClick,
+        modifier = modifier.size(64.dp),
+        shape = CircleShape,
+        colors = IconButtonDefaults.filledIconButtonColors(containerColor = bgColor)
+    ) {
+        Icon(
+            imageVector = if (isVideoOn) Icons.Rounded.Videocam else Icons.Rounded.VideocamOff,
+            contentDescription = if (isVideoOn) "Turn off camera" else "Turn on camera",
+            tint = iconTint,
+            modifier = Modifier.size(28.dp)
+        )
+    }
+}
+
+@Composable
+fun CameraPreviewView(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val previewView = remember { PreviewView(context) }
+
+    LaunchedEffect(Unit) {
+        val future = ProcessCameraProvider.getInstance(context)
+        future.addListener({
+            val provider = future.get()
+            val preview = CameraPreview.Builder().build().also {
+                it.setSurfaceProvider(previewView.surfaceProvider)
+            }
+            try {
+                provider.unbindAll()
+                provider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_FRONT_CAMERA,
+                    preview
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }, ContextCompat.getMainExecutor(context))
+    }
+
+    AndroidView(factory = { previewView }, modifier = modifier)
+}
+
+// ── Bot Video ─────────────────────────────────────────────────────────────────
+
+/**
+ * Switches between local sample video (placeholder) and live WebRTC stream.
+ * Wire up BotVideoSource.WebRTC when your GPU server's signaling URL is ready.
+ */
+@Composable
+fun BotVideoArea(source: BotVideoSource, modifier: Modifier = Modifier) {
+    when (source) {
+        is BotVideoSource.None -> {} // shouldn't reach here — energy ball is shown instead
+        is BotVideoSource.LocalSample -> LocalSampleVideoView(modifier = modifier)
+        is BotVideoSource.WebRTC -> WebRTCVideoView(signalingUrl = source.signalingUrl, modifier = modifier)
+    }
+}
+
+/** Loop bot_sample.mp4 as a placeholder for the bot's video feed */
+@Composable
+fun LocalSampleVideoView(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            val uri = Uri.parse("android.resource://${context.packageName}/raw/bot_sample")
+            setMediaItem(MediaItem.fromUri(uri))
+            repeatMode = Player.REPEAT_MODE_ONE
+            volume = 0f // muted — audio comes from LiveVoiceController
+            playWhenReady = true
+            prepare()
+        }
+    }
+    DisposableEffect(exoPlayer) { onDispose { exoPlayer.release() } }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+            }
+        },
+        modifier = modifier
+    )
+}
+
+/**
+ * Renders live WebRTC video from the GPU server.
+ *
+ * To activate: set botVideoSource = BotVideoSource.WebRTC("ws://your-server/webrtc")
+ * in LiveVoiceScreen's onVideoToggle.
+ */
+@Composable
+fun WebRTCVideoView(signalingUrl: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val eglBase = remember { EglBase.create() }
+    val manager = remember { WebRTCManager(context) }
+    val renderer = remember { SurfaceViewRenderer(context) }
+
+    LaunchedEffect(signalingUrl) {
+        renderer.init(eglBase.eglBaseContext, null)
+        renderer.setMirror(false)
+        manager.initialize(eglBase)
+        manager.connect(signalingUrl, renderer)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            manager.release()
+            renderer.release()
+        }
+    }
+
+    AndroidView(factory = { renderer }, modifier = modifier)
 }

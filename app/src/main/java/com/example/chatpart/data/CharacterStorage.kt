@@ -4,11 +4,19 @@ import android.content.Context
 import com.example.chatpart.domain.Profile
 
 /**
- * Character profile storage using SharedPreferences
+ * Character profile storage using SharedPreferences.
+ *
+ * IMPORTANT: Pass [uid] so each Firebase account gets its own storage namespace.
+ * Without uid isolation, switching accounts shows the previous user's characters.
+ *
+ * SharedPreferences file naming:
+ *   - Logged-in user:  "characters_{uid}"
+ *   - Guest / no uid:  "characters"  (fallback, should not normally be used)
  */
-class CharacterStorage(private val context: Context) {
+class CharacterStorage(private val context: Context, uid: String = "") {
 
-    private val prefs = context.getSharedPreferences("characters", Context.MODE_PRIVATE)
+    private val prefsName = if (uid.isNotEmpty()) "characters_${uid}" else "characters"
+    private val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 
     companion object {
         private const val KEY_CHARACTERS = "character_list"

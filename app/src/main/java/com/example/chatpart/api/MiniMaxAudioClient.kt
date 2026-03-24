@@ -71,13 +71,24 @@ class MiniMaxAudioClient(private val context: Context) : AudioClient {
     override suspend fun textToVoice(text: String, voiceId: String, emotion: String, languageBoost: String): String =
         withContext(Dispatchers.IO) {
             val effectiveVoiceId = voiceId.ifBlank { "English_expressive_narrator" }
+            
+            // Normalize emotion to values supported by MiniMax V2:
+            // happy, sad, angry, surprised, fearful, disgusted, or null for neutral
+            val validEmotions = setOf("happy", "sad", "angry", "surprised", "fearful", "disgusted")
+            val effectiveEmotion = when {
+                emotion.lowercase() in validEmotions -> emotion.lowercase()
+                emotion.contains("高兴", true) || emotion.contains("喜", true) -> "happy"
+                emotion.contains("伤心", true) || emotion.contains("悲", true) -> "sad"
+                emotion.contains("生气", true) || emotion.contains("怒", true) -> "angry"
+                else -> null // Default to neutral if unrecognized
+            }
 
             val requestBody = MiniMaxTtsRequest(
                 model = MiniMaxConfig.TTS_MODEL,
                 text = text,
                 voice_setting = VoiceSetting(
                     voice_id = effectiveVoiceId,
-                    emotion = emotion.ifBlank { null },
+                    emotion = effectiveEmotion,
                     language_boost = languageBoost.ifBlank { null }
                 ),
                 audio_setting = AudioSetting(

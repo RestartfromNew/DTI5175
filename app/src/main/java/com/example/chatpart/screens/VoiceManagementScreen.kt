@@ -104,6 +104,7 @@ fun VoiceManagementScreen(
     }
 
     // Fetch all cloned voices from MiniMax API and find any not in local storage
+    // SECURITY (P1, P5): Filter by user ownership to prevent seeing/deleting other users' voices
     fun syncFromApi() {
         scope.launch {
             isSyncing = true
@@ -112,8 +113,23 @@ fun VoiceManagementScreen(
                 .onSuccess { apiVoiceIds ->
                     val localVoiceIds = characterStorage.loadCharacters()
                         .mapNotNull { it.voiceId }.toSet()
+
+                    // SECURITY (P5): Only show API-only voices that belong to the current user
+                    // Filter by uid prefix in voice_id format: cp{uid_prefix}_{...}
+                    val currentUid = userVoiceManager.uid
+                    val userOwnedVoiceIds = apiVoiceIds.filter { voiceId ->
+                        voiceCloneManager.isVoiceOwnedByUser(voiceId, currentUid)
+                    }
+
                     // Only keep IDs that aren't already linked to a local character
-                    apiOnlyVoiceIds = apiVoiceIds.filter { it !in localVoiceIds }
+                    apiOnlyVoiceIds = userOwnedVoiceIds.filter { it !in localVoiceIds }
+
+                    // Log warning if there are other users' voices on this device
+                    val otherUsersVoices = apiVoiceIds.filter { !voiceCloneManager.isVoiceOwnedByUser(it, currentUid) }
+                    if (otherUsersVoices.isNotEmpty()) {
+                        Log.w("VoiceManagement", "Found ${otherUsersVoices.size} voices from other users (will not display)")
+                    }
+
                     syncError = null
                 }
                 .onFailure { e ->
@@ -257,12 +273,27 @@ fun VoiceManagementScreen(
     }
 
     // Delete API-only voice (exists on MiniMax/Firestore but not linked to local character)
+    // SECURITY (P5): Verify ownership before any destructive operations
     fun deleteApiOnlyVoice(voiceId: String) {
         scope.launch {
             deleteError = null
+
+            // SECURITY (P5): Final ownership verification before deletion
+            val currentUid = userVoiceManager.uid
+            if (!voiceCloneManager.isVoiceOwnedByUser(voiceId, currentUid)) {
+                Log.e("VoiceManagement", "Ownership verification failed for voiceId: $voiceId")
+                deleteError = "Cannot delete voice: ownership verification failed"
+                snackbarHostState.showSnackbar(
+                    message = "Cannot delete voice from another user",
+                    duration = SnackbarDuration.Short
+                )
+                return@launch
+            }
+
             userVoiceManager.deleteClonedVoice(voiceId)
                 .onSuccess {
-                    // Also delete from MiniMax
+                    // SECURITY (P5): Only delete from MiniMax if ownership is verified
+                    // Since we already verified ownership, this should be safe
                     voiceCloneManager.deleteVoice(voiceId)
                         .onSuccess {
                             Log.d("VoiceManagement", "Successfully deleted from both Firestore and MiniMax: $voiceId")
@@ -400,7 +431,7 @@ fun VoiceManagementScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             // Tab Row
             TabRow(
@@ -422,7 +453,32 @@ fun VoiceManagementScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            // Slot status bar — shown right below tabs (only on Cloned Voices tab)
+            if (selectedTab == 0 && slotStatus != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 10.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Voice Slots: ${slotStatus!!.used} / ${slotStatus!!.limit}",
+                        fontSize = 12.sp,
+                        color = if (slotStatus!!.isFull) Color(0xFFE53935) else subtitleColor
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    LinearProgressIndicator(
+                        progress = { slotStatus!!.percentage },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(5.dp),
+                        color = if (slotStatus!!.isFull) Color(0xFFE53935) else Peach,
+                        trackColor = subtitleColor.copy(alpha = 0.15f),
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Tab content
             Box(
@@ -496,31 +552,6 @@ fun VoiceManagementScreen(
 
             // Clone new voice button (only show in Cloned Voices tab)
             if (selectedTab == 0) {
-                // Slot status indicator
-                if (slotStatus != null) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Voice Slots: ${slotStatus!!.used}/${slotStatus!!.limit}",
-                            fontSize = 12.sp,
-                            color = if (slotStatus!!.isFull) Color(0xFFE53935) else subtitleColor
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        LinearProgressIndicator(
-                            progress = { slotStatus!!.percentage },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(6.dp),
-                            color = if (slotStatus!!.isFull) Color(0xFFE53935) else Peach,
-                            trackColor = subtitleColor.copy(alpha = 0.2f),
-                        )
-                    }
-                }
-
                 Button(
                     onClick = onNavigateToVoiceClone,
                     modifier = Modifier
@@ -780,44 +811,46 @@ private fun ClonedVoicesTab(
 ) {
     val totalCount = charactersWithVoice.size + apiOnlyVoiceIds.size
 
-    // Voice count subtitle
-    Text(
-        text = t("VOICE_COUNT").replace("{n}", totalCount.toString()),
-        fontSize = 14.sp,
-        color = subtitleColor,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-    )
+    // ⚠️ Must wrap in Column — parent is a Box (Z-stack), not a Column.
+    // Without this, Text and LazyColumn would overlap at (0,0) inside the Box.
+    Column(modifier = Modifier.fillMaxSize()) {
 
-    if (totalCount == 0) {
-        // Empty state
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally
+        // Voice count subtitle
+        Text(
+            text = t("VOICE_COUNT").replace("{n}", totalCount.toString()),
+            fontSize = 14.sp,
+            color = subtitleColor,
+            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        )
+
+        if (totalCount == 0) {
+            // Empty state — fills remaining column space so it looks centred
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.RecordVoiceOver,
-                    contentDescription = null,
-                    tint = subtitleColor,
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = t("NO_VOICES"),
-                    fontSize = 16.sp,
-                    color = subtitleColor
-                )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        imageVector = Icons.Rounded.RecordVoiceOver,
+                        contentDescription = null,
+                        tint = subtitleColor,
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = t("NO_VOICES"),
+                        fontSize = 16.sp,
+                        color = subtitleColor
+                    )
+                }
             }
-        }
-    } else {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
             // Local characters with voiceId
             items(charactersWithVoice, key = { it.id }) { profile ->
                 VoiceItem(
@@ -859,9 +892,10 @@ private fun ClonedVoicesTab(
                         textColor = textColor
                     )
                 }
-            }
-        }
-    }
+            }  // closes if (apiOnlyVoiceIds.isNotEmpty())
+        }  // closes LazyColumn content
+    }  // closes else
+} // end Column wrapper
 
     // Delete confirmation dialog
     if (showDeleteDialog != null) {

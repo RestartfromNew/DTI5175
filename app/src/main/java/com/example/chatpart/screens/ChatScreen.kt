@@ -25,7 +25,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -524,6 +530,12 @@ fun ChatScreen(
                                     permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
                             },
+                            onCancelRecording = {
+                                triggerHapticFeedback()
+                                isRecording = false
+                                val discarded = audioManager.stopRecording()
+                                discarded?.delete() // 丢弃录音，不发送
+                            },
                             onStopRecording = {
                                 triggerHapticFeedback()
                                 isRecording = false
@@ -840,27 +852,48 @@ fun VoiceRecordButton(
     modifier: Modifier = Modifier,
     currentLanguage: String = "en",
     onStartRecording: () -> Unit,
-    onStopRecording: () -> Unit
+    onStopRecording: () -> Unit,
+    onCancelRecording: () -> Unit = {}
 ) {
+    val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
+
+    // 拖拽状态（右滑取消）
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    val cancelThresholdPx = with(density) { 80.dp.toPx() }
+    val isCancelZone = dragOffsetX > cancelThresholdPx   // 右滑进入取消区
+
     val bgColor by animateColorAsState(
-        if (isRecording) Color(0xFFFF4444).copy(alpha = 0.1f) else Color(0xFFF0F0F0),
+        targetValue = when {
+            isCancelZone -> Color(0xFFFF4444).copy(alpha = 0.15f)  // 红色：取消
+            isRecording  -> Color(0xFF4CAF50).copy(alpha = 0.15f)  // 绿色：录音中
+            else         -> Color(0xFFF0F0F0)                      // 灰色：默认
+        },
         label = "recordBg"
     )
     val textColor by animateColorAsState(
-        if (isRecording) Color(0xFFFF4444) else Color.Gray,
+        targetValue = when {
+            isCancelZone -> Color(0xFFFF4444)
+            isRecording  -> Color(0xFF388E3C)
+            else         -> Color.Gray
+        },
         label = "recordText"
     )
 
-    // Pulsing animation when recording
+    // 录音中脉冲动画（取消区内暂停脉冲）
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 1f,
-        targetValue = if (isRecording) 1.03f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(600),
-            repeatMode = RepeatMode.Reverse
-        ),
+        targetValue = if (isRecording && !isCancelZone) 1.03f else 1f,
+        animationSpec = infiniteRepeatable(tween(600), RepeatMode.Reverse),
         label = "pulseScale"
+    )
+    // 箭头提示闪烁
+    val arrowAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(tween(500, easing = LinearEasing), RepeatMode.Reverse),
+        label = "arrowAlpha"
     )
 
     Surface(
@@ -870,44 +903,96 @@ fun VoiceRecordButton(
             .height(48.dp)
             .scale(pulseScale)
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        onStartRecording()
-                        // Wait for release
-                        val released = tryAwaitRelease()
-                        if (released) {
-                            onStopRecording()
-                        } else {
-                            onStopRecording()
+                awaitEachGesture {
+                    // ① 按下 → 开始录音
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    onStartRecording()
+                    dragOffsetX = 0f
+                    var wasInCancelZone = false
+
+                    // ② 追踪手指横向移动
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val ptr = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ptr.pressed) { ptr.consume(); break }
+                        ptr.consume()
+                        dragOffsetX = (ptr.position.x - down.position.x).coerceIn(-50f, 400f)
+
+                        // 进入/离开取消区各震动一次
+                        val inCancel = dragOffsetX > cancelThresholdPx
+                        if (inCancel != wasInCancelZone) {
+                            wasInCancelZone = inCancel
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         }
                     }
-                )
+
+                    // ③ 松手：取消区 → 取消；正常区 → 发送
+                    val shouldCancel = dragOffsetX > cancelThresholdPx
+                    dragOffsetX = 0f
+                    if (shouldCancel) onCancelRecording() else onStopRecording()
+                }
             }
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (isRecording) {
-                    // Recording indicator dots
-                    RecordingIndicator()
-                    Spacer(Modifier.width(8.dp))
-                }
+            if (!isRecording) {
+                // 空闲：文字居中
                 Text(
-                    if (isRecording) Languages.getString(currentLanguage, "RELEASE_TO_SEND") else Languages.getString(currentLanguage, "HOLD_TO_TALK"),
+                    text = Languages.getString(currentLanguage, "HOLD_TO_TALK"),
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp,
-                    color = textColor
+                    color = textColor,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
                 )
+            } else {
+                // 录音中：左侧点+文字，右侧箭头/垃圾桶
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RecordingIndicator(isCancelZone = isCancelZone)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (isCancelZone)
+                                Languages.getString(currentLanguage, "LIVE_RELEASE_TO_CANCEL")
+                            else
+                                Languages.getString(currentLanguage, "RELEASE_TO_SEND"),
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 15.sp,
+                            color = textColor
+                        )
+                    }
+                    if (isCancelZone) {
+                        Icon(
+                            Icons.Rounded.Delete,
+                            contentDescription = null,
+                            tint = Color(0xFFFF4444),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "→ →",
+                            color = Color(0xFF388E3C).copy(alpha = arrowAlpha),
+                            fontSize = 12.sp
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-fun RecordingIndicator() {
+fun RecordingIndicator(isCancelZone: Boolean = false) {
     val infiniteTransition = rememberInfiniteTransition(label = "dots")
+    val dotColor = if (isCancelZone) Color(0xFFFF4444) else Color(0xFF4CAF50)
 
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         repeat(3) { index ->
@@ -924,7 +1009,7 @@ fun RecordingIndicator() {
                 modifier = Modifier
                     .size(6.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFFFF4444).copy(alpha = alpha))
+                    .background(dotColor.copy(alpha = alpha))
             )
         }
     }

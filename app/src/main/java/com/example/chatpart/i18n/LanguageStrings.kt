@@ -178,7 +178,17 @@ object EnglishStrings {
         "LIVE_SPEECH_NOT_RECOGNIZED" to "Speech not recognized, try again",
         "LIVE_ERROR" to "Error: {message}",
         "LIVE_PLAYBACK_FAILED" to "Audio playback failed",
-        "LIVE_MIC_PERMISSION" to "Microphone permission required for voice features"
+        "LIVE_MIC_PERMISSION" to "Microphone permission required for voice features",
+
+        // End Call Dialog
+        "LIVE_END_CALL_TITLE" to "End Call",
+        "LIVE_END_CALL_CONFIRM" to "Are you sure you want to end this call?",
+        "LIVE_END_CALL_YES" to "End Call",
+        "LIVE_END_CALL_NO" to "Continue",
+
+        // Swipe-to-cancel
+        "LIVE_SLIDE_TO_CANCEL" to "← Slide left to cancel",
+        "LIVE_RELEASE_TO_CANCEL" to "Release to cancel"
     )
 }
 
@@ -360,7 +370,17 @@ object FrenchStrings {
         "LIVE_SPEECH_NOT_RECOGNIZED" to "Parole non reconnue, réessayez",
         "LIVE_ERROR" to "Erreur: {message}",
         "LIVE_PLAYBACK_FAILED" to "Échec de la lecture audio",
-        "LIVE_MIC_PERMISSION" to "Permission du microphone requise"
+        "LIVE_MIC_PERMISSION" to "Permission du microphone requise",
+
+        // End Call Dialog
+        "LIVE_END_CALL_TITLE" to "Fin d'appel",
+        "LIVE_END_CALL_CONFIRM" to "Voulez-vous vraiment raccrocher ?",
+        "LIVE_END_CALL_YES" to "Raccrocher",
+        "LIVE_END_CALL_NO" to "Continuer",
+
+        // Swipe-to-cancel
+        "LIVE_SLIDE_TO_CANCEL" to "← Glisser pour annuler",
+        "LIVE_RELEASE_TO_CANCEL" to "Relâcher pour annuler"
     )
 }
 
@@ -542,6 +562,16 @@ object ChineseStrings {
         "LIVE_SPEECH_NOT_RECOGNIZED" to "未能识别语音，请重新按住麦克风说话",
         "LIVE_ERROR" to "出错了：{message}",
         "LIVE_PLAYBACK_FAILED" to "音频播放失败",
-        "LIVE_MIC_PERMISSION" to "需要麦克风权限才能使用语音功能，请在系统设置中允许"
+        "LIVE_MIC_PERMISSION" to "需要麦克风权限才能使用语音功能，请在系统设置中允许",
+
+        // End Call Dialog
+        "LIVE_END_CALL_TITLE" to "结束通话",
+        "LIVE_END_CALL_CONFIRM" to "确定要挂断吗？",
+        "LIVE_END_CALL_YES" to "挂断",
+        "LIVE_END_CALL_NO" to "继续通话",
+
+        // Swipe-to-cancel
+        "LIVE_SLIDE_TO_CANCEL" to "← 左滑取消录音",
+        "LIVE_RELEASE_TO_CANCEL" to "松开即取消"
     )
 }
