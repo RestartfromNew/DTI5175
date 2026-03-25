@@ -10,6 +10,7 @@ val minimaxGroupId = localProps.getProperty("MINIMAX_GROUP_ID") ?: ""
 val minimaxBaseUrl = localProps.getProperty("MINIMAX_BASE_URL") ?: ""
 val assemblyAiApiKey = localProps.getProperty("ASSEMBLYAI_API_KEY") ?: ""
 val deepgramApiKey = localProps.getProperty("DEEPGRAM_API_KEY") ?: ""
+val syncServerUrl = localProps.getProperty("SYNC_SERVER_URL") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -40,6 +41,7 @@ android {
         buildConfigField("String", "MINIMAX_BASE_URL", "\"$minimaxBaseUrl\"")
         buildConfigField("String", "ASSEMBLYAI_API_KEY", "\"$assemblyAiApiKey\"")
         buildConfigField("String", "DEEPGRAM_API_KEY", "\"$deepgramApiKey\"")
+        buildConfigField("String", "SYNC_SERVER_URL", "\"$syncServerUrl\"")
     }
 
     buildTypes {

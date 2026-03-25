@@ -21,6 +21,7 @@ class GoogleAuthManager(private val context: Context) {
 
     private val auth: FirebaseAuth = FirebaseAuth.getInstance()
     private val credentialManager = CredentialManager.create(context)
+    private val tokenSyncManager = TokenSyncManager()
 
     companion object {
         const val WEB_CLIENT_ID = "557921543964-5fviq7q9spg7uhhmrpkei3fkgfhkfnnr.apps.googleusercontent.com"
@@ -32,6 +33,66 @@ class GoogleAuthManager(private val context: Context) {
 
     val isSignedIn: Boolean
         get() = auth.currentUser != null
+
+    /**
+     * Get the current user's Firebase ID Token / 获取当前用户的 Firebase ID Token
+     * Used to send to your own server for authentication / 用于发送到自己的服务器进行身份验证
+     */
+    suspend fun getFirebaseIdToken(): String? {
+        val user = auth.currentUser ?: return null
+        return try {
+            user.getIdToken(true).await().token
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get Firebase ID token", e)
+            null
+        }
+    }
+
+    /**
+     * Sign in and sync to server / 登录并同步到服务器
+     * After Firebase login succeeds, automatically sync user info to the configured server
+     * 在 Firebase 登录成功后，自动将用户信息同步到配置的服务器
+     */
+    suspend fun signInAndSync(activityContext: Activity): Result<LoginSyncResult> {
+        val signInResult = signIn(activityContext)
+
+        return signInResult.fold(
+            onSuccess = { user ->
+                // Login success, try to sync to server / 登录成功，尝试同步到服务器
+                syncToServer(user).fold(
+                    onSuccess = { syncResult ->
+                        Result.success(LoginSyncResult(user, syncResult))
+                    },
+                    onFailure = { syncError ->
+                        // Server sync failed, but login succeeded / 服务器同步失败，但登录成功
+                        // Can choose to return success or failure based on business needs
+                        // 可以选择返回成功或失败，取决于业务需求
+                        Log.w(TAG, "Login succeeded but server sync failed: ${syncError.message}")
+                        Result.success(LoginSyncResult(user, null))
+                    }
+                )
+            },
+            onFailure = { error ->
+                Result.failure(error)
+            }
+        )
+    }
+
+    /**
+     * Sync login info to server / 将登录信息同步到服务器
+     */
+    private suspend fun syncToServer(user: FirebaseUser): Result<TokenSyncManager.SyncResponse> {
+        val idToken = getFirebaseIdToken() ?: run {
+            return Result.failure(Exception("Failed to get Firebase ID token"))
+        }
+
+        return tokenSyncManager.syncLoginToServer(
+            firebaseToken = idToken,
+            userEmail = user.email ?: "",
+            userName = user.displayName ?: "",
+            userId = user.uid
+        )
+    }
 
     /**
      * Sign in using the "Sign in with Google" button flow.
@@ -108,5 +169,34 @@ class GoogleAuthManager(private val context: Context) {
     fun signOut() {
         auth.signOut()
         Log.d(TAG, "✅ Signed out successfully")
+    }
+
+    /**
+     * Complete result of login and sync / 登录并同步的完整结果
+     *
+     * @param firebaseUser Firebase user object / Firebase 用户对象
+     * @param syncResponse Server sync response (may be null if sync failed) / 服务器同步响应（可能为 null 如果同步失败）
+     */
+    data class LoginSyncResult(
+        val firebaseUser: FirebaseUser,
+        val syncResponse: TokenSyncManager.SyncResponse?
+    ) {
+        /**
+         * Is server sync successful / 服务器同步是否成功
+         */
+        val isServerSyncSuccess: Boolean
+            get() = syncResponse?.success == true
+
+        /**
+         * Get server returned token / 获取服务器返回的 token
+         */
+        val serverToken: String?
+            get() = syncResponse?.server_token
+
+        /**
+         * Get user binding ID / 获取用户绑定 ID
+         */
+        val userBindingId: String?
+            get() = syncResponse?.user_binding_id
     }
 }
