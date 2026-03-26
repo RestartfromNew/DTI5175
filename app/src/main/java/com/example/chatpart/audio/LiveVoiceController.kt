@@ -29,10 +29,13 @@ import kotlin.math.abs
 import kotlin.math.sqrt
 
 /**
- * LiveVoice 业务控制器 — Push-to-Talk（AudioRecord + AssemblyAI ASR 版）
+ * LiveVoice 业务控制器
  *
- * 按住：AudioRecord 开始录 PCM，RMS 驱动波形动画
- * 松开：停录 → 保存 WAV → 上传 AssemblyAI → 轮询结果 → AI 回复 → TTS 播放
+ * 支持两种模式：
+ *   Push-to-Talk — 按住录音，松开发送（startListening / stopListening）
+ *   Free Talk    — VAD 自动检测说话/静默，无需按键（startFreeMode / stopFreeMode）
+ *
+ * 共用管道：WAV → Deepgram ASR → Gemini AI → MiniMax TTS
  */
 class LiveVoiceController(
     private val context: Context,
@@ -41,13 +44,19 @@ class LiveVoiceController(
     private val scope: CoroutineScope,
     private val currentLanguage: String = "en"
 ) {
-    // Helper function for localized strings
     private fun t(key: String) = Languages.getString(currentLanguage, key)
+
     companion object {
         private const val TAG = "LiveVoiceController"
         private const val SAMPLE_RATE = 16000
         private const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         private const val AUDIO_FORMAT_PCM = AudioFormat.ENCODING_PCM_16BIT
+
+        // VAD 参数
+        private const val VAD_SPEECH_RMS = 800f      // RMS 超过此值 = 有人说话
+        private const val VAD_SILENCE_MS = 800L      // 静默超过 800ms → 停止录音
+        private const val VAD_MIN_SPEECH_MS = 400L   // 最短说话时长，避免误触
+        private const val VAD_MAX_SPEECH_MS = 30_000L // 最长单次说话 30s
     }
 
     // UI callbacks
@@ -60,133 +69,265 @@ class LiveVoiceController(
     private val asrClient = DeepgramAsrClient()
     private var mediaPlayer: MediaPlayer? = null
     private var currentJob: Job? = null
+    private var vadJob: Job? = null
     private var isReleased = false
 
-    // Flag set by stopListening() to signal the recording loop to finish
-    @Volatile private var isRecording = false
+    @Volatile private var isRecording = false   // PTT 录音标志
+    @Volatile private var isVadActive = false   // VAD 循环运行标志
+    @Volatile private var isVadBlocked = false  // AI 说话/处理中，VAD 暂停捕获
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    /**
-     * Called when user presses mic button.
-     * Starts AudioRecord, waits for stopListening(), then transcribes + replies.
-     */
-    fun startListening(profile: Profile, history: List<Message>) {
-        if (isReleased) {
-            Log.w(TAG, "Controller released, ignoring startListening")
-            return
-        }
+    // ── Push-to-Talk ─────────────────────────────────────────────────────────
 
+    /** 用户按下麦克风 — 开始录音 */
+    fun startListening(profile: Profile, history: List<Message>) {
+        if (isReleased) return
         currentJob?.cancel()
         currentJob = scope.launch {
-            // Initial UI update on Main thread
             withContext(Dispatchers.Main) {
                 onStateChanged?.invoke(LiveVoiceState.USER_SPEAKING)
                 onUserCaptionUpdated?.invoke("")
                 onAICaptionUpdated?.invoke("")
                 onAmplitudesUpdated?.invoke(List(32) { 0.1f })
             }
+            val wavFile = withContext(Dispatchers.IO) { recordAudio() }
+            withContext(Dispatchers.Main) { onAmplitudesUpdated?.invoke(List(32) { 0.3f }) }
+            processWavFile(wavFile, profile, history)
+        }
+    }
 
-            // Record on IO thread — blocks until stopListening() is called
-            val wavFile = withContext(Dispatchers.IO) {
-                recordAudio()
-            }
+    // ── Free Talk (VAD) ──────────────────────────────────────────────────────
 
-            withContext(Dispatchers.Main) {
-                onAmplitudesUpdated?.invoke(List(32) { 0.3f })
-            }
+    /**
+     * 启动自由通话模式 — VAD 循环自动检测说话/静默
+     * @param historyProvider 返回最新对话历史的 lambda（每次说话都会调用拿到最新消息）
+     */
+    fun startFreeMode(profile: Profile, historyProvider: () -> List<Message>) {
+        if (isReleased) return
+        stopFreeMode()  // 确保旧的 VAD 循环已停止
+        isVadActive = true
+        isVadBlocked = false
+        vadJob = scope.launch(Dispatchers.IO) {
+            runVadLoop(profile, historyProvider)
+        }
+    }
 
-            if (wavFile == null || wavFile.length() < 2000) {
-                Log.w(TAG, "Recording too short or failed (size=${wavFile?.length()})")
-                withContext(Dispatchers.Main) {
-                    onError?.invoke(t("LIVE_RECORD_TOO_SHORT"))
-                    onStateChanged?.invoke(LiveVoiceState.IDLE)
-                    onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+    /** 停止自由通话模式 */
+    fun stopFreeMode() {
+        isVadActive = false
+        isVadBlocked = false
+        vadJob?.cancel()
+        vadJob = null
+        scope.launch(Dispatchers.Main) {
+            onStateChanged?.invoke(LiveVoiceState.IDLE)
+            onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    private suspend fun runVadLoop(profile: Profile, historyProvider: () -> List<Message>) {
+        val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT_PCM)
+            .coerceAtLeast(3200)
+        val audioRecord = try {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT_PCM, bufferSize * 4
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "VAD AudioRecord init failed: ${e.message}"); return
+        }
+        if (audioRecord.state != AudioRecord.STATE_INITIALIZED) {
+            audioRecord.release(); return
+        }
+
+        val chunk = ByteArray(bufferSize)
+        var capturing = false
+        var speechBuffer = ByteArrayOutputStream()
+        var silenceStartMs = 0L
+        var speechStartMs = 0L
+
+        audioRecord.startRecording()
+        Log.d(TAG, "VAD loop started")
+
+        try {
+            while (isVadActive) {
+                val read = audioRecord.read(chunk, 0, chunk.size)
+                if (read <= 0) continue
+
+                val rms = computeRms(chunk, read)
+                val now = System.currentTimeMillis()
+
+                // AI 正在说话 / 处理中 — 排空录音，不处理
+                if (isVadBlocked) {
+                    if (capturing) {
+                        capturing = false
+                        speechBuffer.reset()
+                        silenceStartMs = 0L
+                    }
+                    continue
                 }
-                wavFile?.delete()
-                return@launch
-            }
 
-            // ASR — show PROCESSING state while waiting
-            withContext(Dispatchers.Main) {
-                onStateChanged?.invoke(LiveVoiceState.PROCESSING)
-            }
-            val finalText = try {
-                withContext(Dispatchers.IO) { asrClient.transcribe(wavFile) }
-            } catch (e: Exception) {
-                Log.e(TAG, "ASR exception", e)
-                wavFile.delete()
-                withContext(Dispatchers.Main) {
-                    onError?.invoke(t("LIVE_SPEECH_NOT_RECOGNIZED"))
-                    onStateChanged?.invoke(LiveVoiceState.IDLE)
-                    onAmplitudesUpdated?.invoke(List(32) { 0.1f })
-                }
-                return@launch
-            }
-            wavFile.delete()
+                if (!capturing) {
+                    // 待机状态 — 微弱波形显示"正在聆听"
+                    val normalized = (rms / 10000f).coerceIn(0.02f, 0.22f)
+                    withContext(Dispatchers.Main) {
+                        onAmplitudesUpdated?.invoke(generateAmplitudesFromRms(normalized))
+                    }
+                    if (rms > VAD_SPEECH_RMS) {
+                        // 检测到说话 — 开始录
+                        capturing = true
+                        speechBuffer.reset()
+                        speechBuffer.write(chunk, 0, read)
+                        speechStartMs = now
+                        silenceStartMs = 0L
+                        withContext(Dispatchers.Main) {
+                            onStateChanged?.invoke(LiveVoiceState.USER_SPEAKING)
+                        }
+                    }
+                } else {
+                    // 录音中
+                    speechBuffer.write(chunk, 0, read)
+                    val normalized = (rms / 10000f).coerceIn(0.05f, 1f)
+                    withContext(Dispatchers.Main) {
+                        onAmplitudesUpdated?.invoke(generateAmplitudesFromRms(normalized))
+                    }
 
-            Log.d(TAG, "ASR result: \"$finalText\"")
+                    val elapsed = now - speechStartMs
+                    if (rms < VAD_SPEECH_RMS) {
+                        if (silenceStartMs == 0L) silenceStartMs = now
+                        val silenced = now - silenceStartMs
+                        if (silenced >= VAD_SILENCE_MS || elapsed >= VAD_MAX_SPEECH_MS) {
+                            // 静默超时 / 达到最长时长 — 结束这段话
+                            capturing = false
+                            val pcmData = speechBuffer.toByteArray()
+                            speechBuffer.reset()
+                            silenceStartMs = 0L
 
-            if (finalText.isBlank()) {
-                withContext(Dispatchers.Main) {
-                    onError?.invoke(t("LIVE_SPEECH_NOT_RECOGNIZED"))
-                    onStateChanged?.invoke(LiveVoiceState.IDLE)
-                    onAmplitudesUpdated?.invoke(List(32) { 0.1f })
-                }
-                return@launch
-            }
-
-            // UI Callback must be on Main thread to prevent crash
-            withContext(Dispatchers.Main) {
-                onUserCaptionUpdated?.invoke(finalText)
-            }
-
-            // AI reply + TTS
-            try {
-                val chatReply = withContext(Dispatchers.IO) {
-                    brain.sendMessage(profile, history, finalText)
-                }
-                val aiText = chatReply.replyText
-                val emotion = chatReply.emotion
-
-                val voicePath = withContext(Dispatchers.IO) {
-                    audioClient.textToVoice(
-                        text = aiText,
-                        voiceId = profile.voiceId ?: "",
-                        emotion = "",        // emotion 只有部分中文 voice 支持，英文 voice 传任何值都报错
-                        languageBoost = ""
-                    )
-                }
-
-                withContext(Dispatchers.Main) {
-                    onAICaptionUpdated?.invoke(aiText)
-                    onStateChanged?.invoke(LiveVoiceState.AI_SPEAKING)
-                }
-
-                playAudio(voicePath) {
-                    if (!isReleased) {
-                        // Use scope to launch UI update correctly
-                        scope.launch(Dispatchers.Main) {
-                            onStateChanged?.invoke(LiveVoiceState.IDLE)
-                            onAmplitudesUpdated?.invoke(List(32) { 0.1f })
-                            delay(3000)
-                            if (!isReleased) {
-                                onUserCaptionUpdated?.invoke("")
-                                onAICaptionUpdated?.invoke("")
+                            if (elapsed >= VAD_MIN_SPEECH_MS && pcmData.size >= 3200) {
+                                isVadBlocked = true
+                                val wavFile = writePcmToWav(pcmData)
+                                withContext(Dispatchers.Main) {
+                                    onAmplitudesUpdated?.invoke(List(32) { 0.3f })
+                                }
+                                processWavFile(wavFile, profile, historyProvider())
+                                // processWavFile 里 playAudio 结束后会回调 onStateChanged(IDLE)
+                                // 但 VAD 需要在 TTS 播完后才解除 block
+                                // 通过 awaitVadUnblock() 等待
+                            } else {
+                                withContext(Dispatchers.Main) {
+                                    onStateChanged?.invoke(LiveVoiceState.IDLE)
+                                }
                             }
+                        }
+                    } else {
+                        silenceStartMs = 0L  // 重置静默计时
+                    }
+                }
+            }
+        } finally {
+            audioRecord.stop()
+            audioRecord.release()
+            Log.d(TAG, "VAD loop stopped")
+        }
+    }
+
+    // ── Shared pipeline: WAV → ASR → AI → TTS ────────────────────────────────
+
+    /**
+     * 共用处理管道，PTT 和 VAD 都调用这里。
+     * 结束后自动解除 isVadBlocked（如果 VAD 模式在运行）。
+     */
+    private suspend fun processWavFile(
+        wavFile: File?,
+        profile: Profile,
+        history: List<Message>
+    ) {
+        if (wavFile == null || wavFile.length() < 2000) {
+            Log.w(TAG, "Recording too short or failed (size=${wavFile?.length()})")
+            withContext(Dispatchers.Main) {
+                onError?.invoke(t("LIVE_RECORD_TOO_SHORT"))
+                onStateChanged?.invoke(LiveVoiceState.IDLE)
+                onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+            }
+            wavFile?.delete()
+            isVadBlocked = false
+            return
+        }
+
+        withContext(Dispatchers.Main) { onStateChanged?.invoke(LiveVoiceState.PROCESSING) }
+
+        val finalText = try {
+            withContext(Dispatchers.IO) { asrClient.transcribe(wavFile) }
+        } catch (e: Exception) {
+            Log.e(TAG, "ASR exception", e)
+            wavFile.delete()
+            withContext(Dispatchers.Main) {
+                onError?.invoke(t("LIVE_SPEECH_NOT_RECOGNIZED"))
+                onStateChanged?.invoke(LiveVoiceState.IDLE)
+                onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+            }
+            isVadBlocked = false
+            return
+        }
+        wavFile.delete()
+        Log.d(TAG, "ASR result: \"$finalText\"")
+
+        if (finalText.isBlank()) {
+            withContext(Dispatchers.Main) {
+                onError?.invoke(t("LIVE_SPEECH_NOT_RECOGNIZED"))
+                onStateChanged?.invoke(LiveVoiceState.IDLE)
+                onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+            }
+            isVadBlocked = false
+            return
+        }
+
+        withContext(Dispatchers.Main) { onUserCaptionUpdated?.invoke(finalText) }
+
+        try {
+            val chatReply = withContext(Dispatchers.IO) {
+                brain.sendMessage(profile, history, finalText)
+            }
+            val aiText = chatReply.replyText
+
+            val voicePath = withContext(Dispatchers.IO) {
+                audioClient.textToVoice(
+                    text = aiText,
+                    voiceId = profile.voiceId ?: "",
+                    emotion = "",
+                    languageBoost = ""
+                )
+            }
+
+            withContext(Dispatchers.Main) {
+                onAICaptionUpdated?.invoke(aiText)
+                onStateChanged?.invoke(LiveVoiceState.AI_SPEAKING)
+            }
+
+            playAudio(voicePath) {
+                if (!isReleased) {
+                    scope.launch(Dispatchers.Main) {
+                        isVadBlocked = false   // ← VAD 解除 block，恢复聆听
+                        onStateChanged?.invoke(LiveVoiceState.IDLE)
+                        onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+                        delay(3000)
+                        if (!isReleased) {
+                            onUserCaptionUpdated?.invoke("")
+                            onAICaptionUpdated?.invoke("")
                         }
                     }
                 }
-            } catch (e: Throwable) {
-                // 必须重新抛出 CancellationException，否则协程取消机制会失效
-                if (e is CancellationException) throw e
-                Log.e(TAG, "Voice chat error", e)
-                withContext(Dispatchers.Main) {
-                    onError?.invoke(t("LIVE_ERROR").replace("{message}", e.message ?: e.javaClass.simpleName))
-                    onStateChanged?.invoke(LiveVoiceState.IDLE)
-                    onAmplitudesUpdated?.invoke(List(32) { 0.1f })
-                }
             }
+        } catch (e: Throwable) {
+            if (e is CancellationException) throw e
+            Log.e(TAG, "Voice chat error", e)
+            withContext(Dispatchers.Main) {
+                onError?.invoke(t("LIVE_ERROR").replace("{message}", e.message ?: e.javaClass.simpleName))
+                onStateChanged?.invoke(LiveVoiceState.IDLE)
+                onAmplitudesUpdated?.invoke(List(32) { 0.1f })
+            }
+            isVadBlocked = false
         }
     }
 
@@ -220,8 +361,12 @@ class LiveVoiceController(
     fun release() {
         isReleased = true
         isRecording = false
+        isVadActive = false
+        isVadBlocked = false
         currentJob?.cancel()
         currentJob = null
+        vadJob?.cancel()
+        vadJob = null
         mediaPlayer?.release()
         mediaPlayer = null
         Log.d(TAG, "Controller released")

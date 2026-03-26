@@ -16,6 +16,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -175,6 +176,9 @@ fun LiveVoiceScreen(
     // 挂断确认 dialog
     var showEndCallDialog by remember { mutableStateOf(false) }
 
+    // 对话模式
+    var isFreeMode by remember { mutableStateOf(false) }
+
     // 视频开关 — None=能量球, LocalSample=占位视频, WebRTC=真实推流
     var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.None) }
     var isUserCamOn by remember { mutableStateOf(false) }
@@ -240,6 +244,22 @@ fun LiveVoiceScreen(
                 delay(3000)
                 errorMessage = ""
             }
+        }
+    }
+
+    // VAD 模式切换
+    LaunchedEffect(isFreeMode) {
+        if (isFreeMode) {
+            val hasPermission = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+            if (hasPermission) {
+                controller.startFreeMode(character) { chatHistory }
+            } else {
+                isFreeMode = false
+            }
+        } else {
+            controller.stopFreeMode()
         }
     }
 
@@ -341,7 +361,7 @@ fun LiveVoiceScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 148.dp),
+                .padding(bottom = 200.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             if (errorMessage.isNotEmpty()) {
@@ -421,30 +441,50 @@ fun LiveVoiceScreen(
             )
         }
 
-        // 7. 底部麦克风按钮
-        BottomMicControls(
-            isMicPressed = isMicPressed,
-            isUserSpeaking = isUserSpeaking,
-            onMicPress = {
-                isMicPressed = true
-                if (voiceState == LiveVoiceState.IDLE) {
-                    val hasPermission = ContextCompat.checkSelfPermission(
-                        context, Manifest.permission.RECORD_AUDIO
-                    ) == PackageManager.PERMISSION_GRANTED
-                    if (hasPermission) {
-                        controller.startListening(character, chatHistory)
-                    } else {
-                        isMicPressed = false
-                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        // 7. 模式切换 + 底部麦克风按钮
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 48.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // 模式 Toggle
+            ModeToggle(
+                isFreeMode = isFreeMode,
+                onToggle = { isFreeMode = it },
+                currentLanguage = currentLanguage,
+                modifier = Modifier.padding(bottom = 16.dp)
+            )
+
+            BottomMicControls(
+                isMicPressed = isMicPressed,
+                isUserSpeaking = isUserSpeaking,
+                isFreeMode = isFreeMode,
+                voiceState = voiceState,
+                onMicPress = {
+                    if (!isFreeMode) {
+                        isMicPressed = true
+                        if (voiceState == LiveVoiceState.IDLE) {
+                            val hasPermission = ContextCompat.checkSelfPermission(
+                                context, Manifest.permission.RECORD_AUDIO
+                            ) == PackageManager.PERMISSION_GRANTED
+                            if (hasPermission) {
+                                controller.startListening(character, chatHistory)
+                            } else {
+                                isMicPressed = false
+                                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                        }
                     }
-                }
-            },
-            onMicRelease = {
-                isMicPressed = false
-                if (voiceState == LiveVoiceState.USER_SPEAKING) {
-                    controller.stopListening()
-                }
-            },
+                },
+                onMicRelease = {
+                    if (!isFreeMode) {
+                        isMicPressed = false
+                        if (voiceState == LiveVoiceState.USER_SPEAKING) {
+                            controller.stopListening()
+                        }
+                    }
+                },
             onEndCall = {
                 showEndCallDialog = true
             },
@@ -466,10 +506,9 @@ fun LiveVoiceScreen(
                     botVideoSource = BotVideoSource.None
                 }
             },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = 48.dp)
+            modifier = Modifier.fillMaxWidth()
         )
+        } // end Column
     }
 }
 
@@ -551,20 +590,20 @@ fun CaptionBubble(
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(24.dp))
             .background(
                 if (isUser)
                     Color(0x33B6A6FF)  // 紫色半透明
                 else
                     Color(0x3300D4FF)  // 蓝色半透明
             )
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 28.dp, vertical = 14.dp)
     ) {
         Text(
             text = if (isPartial) "$text ▌" else text,
             color = MoonlightWhite.copy(alpha = if (isPartial) alpha else 1f),
-            fontSize = 15.sp,
-            lineHeight = 22.sp,
+            fontSize = 17.sp,
+            lineHeight = 26.sp,
             textAlign = TextAlign.Center
         )
     }
@@ -930,12 +969,58 @@ fun LiquidVoiceWave(
 }
 
 /**
+ * 对话模式切换 — 按住说话 / 自由通话
+ */
+@Composable
+fun ModeToggle(
+    isFreeMode: Boolean,
+    onToggle: (Boolean) -> Unit,
+    currentLanguage: String = "en",
+    modifier: Modifier = Modifier
+) {
+    fun t(key: String) = Languages.getString(currentLanguage, key)
+    val haptic = LocalHapticFeedback.current
+
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = Color(0x33FFFFFF),
+        modifier = modifier
+    ) {
+        Row(modifier = Modifier.padding(4.dp)) {
+            listOf(false, true).forEach { freeMode ->
+                val selected = isFreeMode == freeMode
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = if (selected) Color(0xFF6C3EFF) else Color.Transparent,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .clickable {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onToggle(freeMode)
+                        }
+                ) {
+                    Text(
+                        text = if (freeMode) t("LIVE_MODE_FREE") else t("LIVE_MODE_PTT"),
+                        color = if (selected) Color.White else Color.White.copy(alpha = 0.55f),
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * 底部麦克风控制按钮（LiveVoice 专用，简单的按住说话）
  */
 @Composable
 fun BottomMicControls(
     isMicPressed: Boolean,
     isUserSpeaking: Boolean,
+    isFreeMode: Boolean = false,
+    voiceState: LiveVoiceState = LiveVoiceState.IDLE,
     onMicPress: () -> Unit,
     onMicRelease: () -> Unit,
     onEndCall: () -> Unit,
@@ -970,40 +1055,48 @@ fun BottomMicControls(
             )
         }
 
-        // 麦克风按钮（按住说话）
+        // 麦克风按钮 — PTT: 按住说话 / Free: 状态指示
+        val micColor = when {
+            isUserSpeaking -> FlowGreen
+            isFreeMode && voiceState == LiveVoiceState.AI_SPEAKING -> Color(0xFF9B59B6)
+            isFreeMode -> Color(0xFF27AE60)
+            else -> NebulaGray
+        }
+        val micBrush = when {
+            isUserSpeaking -> Brush.radialGradient(listOf(FlowGreen, FlowGreen.copy(alpha = 0.6f)))
+            isFreeMode -> Brush.radialGradient(listOf(micColor, micColor.copy(alpha = 0.6f)))
+            else -> FlowGradient
+        }
+
         Box(
             modifier = Modifier
                 .size(88.dp)
                 .clip(CircleShape)
-                .background(
-                    brush = if (isUserSpeaking) {
-                        Brush.radialGradient(listOf(FlowGreen, FlowGreen.copy(alpha = 0.6f)))
-                    } else {
-                        FlowGradient
-                    }
-                )
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onMicPress()
-                            tryAwaitRelease()
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onMicRelease()
-                        }
-                    )
-                },
+                .background(brush = micBrush)
+                .then(
+                    if (!isFreeMode) Modifier.pointerInput(Unit) {
+                        detectTapGestures(
+                            onPress = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onMicPress()
+                                tryAwaitRelease()
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onMicRelease()
+                            }
+                        )
+                    } else Modifier
+                ),
             contentAlignment = Alignment.Center
         ) {
             Surface(
                 modifier = Modifier.size(72.dp),
                 shape = CircleShape,
-                color = if (isUserSpeaking) FlowGreen else NebulaGray
+                color = micColor
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Rounded.Mic,
-                        contentDescription = "Hold to Speak",
+                        contentDescription = if (isFreeMode) "Free Talk Active" else "Hold to Speak",
                         tint = Color.White,
                         modifier = Modifier.size(36.dp)
                     )

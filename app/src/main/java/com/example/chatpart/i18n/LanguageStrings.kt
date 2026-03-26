@@ -170,10 +170,13 @@ object EnglishStrings {
         "LANG_SPANISH" to "Español",
 
         // Live Voice
-        "LIVE_HOLD_TO_SPEAK" to "Hold mic to speak",
+        "LIVE_HOLD_TO_SPEAK" to "",
         "LIVE_LISTENING" to "Listening...",
         "LIVE_THINKING" to "Thinking...",
         "LIVE_SPEAKING" to "Speaking...",
+        "LIVE_MODE_PTT" to "Hold to Talk",
+        "LIVE_MODE_FREE" to "Free Talk",
+        "LIVE_VAD_LISTENING" to "Listening for you...",
         "LIVE_RECORD_TOO_SHORT" to "Recording too short, hold mic to speak",
         "LIVE_SPEECH_NOT_RECOGNIZED" to "Speech not recognized, try again",
         "LIVE_ERROR" to "Error: {message}",
@@ -362,8 +365,11 @@ object FrenchStrings {
         "LANG_SPANISH" to "Español",
 
         // Live Voice
-        "LIVE_HOLD_TO_SPEAK" to "Maintenez le micro pour parler",
+        "LIVE_HOLD_TO_SPEAK" to "",
         "LIVE_LISTENING" to "Écoute...",
+        "LIVE_MODE_PTT" to "Appuyer",
+        "LIVE_MODE_FREE" to "Libre",
+        "LIVE_VAD_LISTENING" to "Je vous écoute...",
         "LIVE_THINKING" to "Réflexion...",
         "LIVE_SPEAKING" to "Parle...",
         "LIVE_RECORD_TOO_SHORT" to "Enregistrement trop court, maintenez le micro",
@@ -554,8 +560,11 @@ object ChineseStrings {
         "LANG_SPANISH" to "Español",
 
         // Live Voice
-        "LIVE_HOLD_TO_SPEAK" to "按住麦克风说话",
+        "LIVE_HOLD_TO_SPEAK" to "",
         "LIVE_LISTENING" to "正在聆听...",
+        "LIVE_MODE_PTT" to "按住说话",
+        "LIVE_MODE_FREE" to "自由通话",
+        "LIVE_VAD_LISTENING" to "正在聆听你...",
         "LIVE_THINKING" to "思考中...",
         "LIVE_SPEAKING" to "正在回答...",
         "LIVE_RECORD_TOO_SHORT" to "录音太短，请按住麦克风说话",
