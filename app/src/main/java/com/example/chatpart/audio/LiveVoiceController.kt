@@ -65,6 +65,7 @@ class LiveVoiceController(
     var onAICaptionUpdated: ((String) -> Unit)? = null
     var onAmplitudesUpdated: ((List<Float>) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
+    var onFinalAiReply: ((String) -> Unit)? = null
 
     private val asrClient = DeepgramAsrClient()
     private var mediaPlayer: MediaPlayer? = null
@@ -290,6 +291,9 @@ class LiveVoiceController(
                 brain.sendMessage(profile, history, finalText)
             }
             val aiText = chatReply.replyText
+            withContext(Dispatchers.Main) {
+                onFinalAiReply?.invoke(aiText)
+            }
 
             val voicePath = withContext(Dispatchers.IO) {
                 audioClient.textToVoice(

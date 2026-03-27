@@ -121,7 +121,14 @@ import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.sin
-
+//import android.net.Uri
+//import androidx.compose.foundation.layout.Box
+//import androidx.compose.runtime.Composable
+import androidx.compose.ui.layout.ContentScale
+//import androidx.compose.ui.Modifier
+import coil.compose.AsyncImage
+import com.example.chatpart.api.VideoClient
+import com.example.chatpart.data.VideoManager
 /**
  * Live Voice 通话状态枚举
  */
@@ -150,7 +157,7 @@ fun LiveVoiceScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val lifecycleOwner = LocalLifecycleOwner.current
-
+    android.util.Log.d("AvatarDebug", "ENTER LiveVoiceScreen, path = ${character.customAvatarPath}")
     // Helper function for localized strings
     fun t(key: String) = Languages.getString(currentLanguage, key)
 
@@ -179,17 +186,56 @@ fun LiveVoiceScreen(
     // 对话模式
     var isFreeMode by remember { mutableStateOf(false) }
 
+    // Select character
+    val selectedCharacterImageUri = remember(character.customAvatarPath) {
+        android.util.Log.d("AvatarDebug", "customAvatarPath = ${character.customAvatarPath}")
+        character.customAvatarPath?.let { Uri.parse(it) }
+    }
+    var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
+
+    //test
+    val videoManager = remember { VideoManager() }
+
+    fun generateAiVideo(replyText: String) {
+        scope.launch {
+            try {
+                android.util.Log.d("AvatarDebug", "generateAiVideo called, replyText = $replyText")
+
+                val result = videoManager.generateVideo(character, replyText)
+                val fullVideoUrl = VideoClient.fullMediaUrl(result.video_url)
+
+                android.util.Log.d("AvatarDebug", "video generated url = $fullVideoUrl")
+
+                botVideoSource = BotVideoSource.RemoteVideo(fullVideoUrl)
+            } catch (e: Exception) {
+                android.util.Log.e("AvatarDebug", "generateAiVideo failed: ${e.message}", e)
+            }
+        }
+    }
+
+
     // 视频开关 — None=能量球, LocalSample=占位视频, WebRTC=真实推流
-    var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.None) }
+    // var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.None) }
+    //    var isUserCamOn by remember { mutableStateOf(false) }
+    //    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+    //        ActivityResultContracts.RequestPermission()
+    //    ) { granted ->
+    //        if (granted) {
+    //            isUserCamOn = true
+    //            botVideoSource = BotVideoSource.LocalSample // 占位视频先显示
+    //            // TODO: 替换为真实地址时改成:
+    //            // botVideoSource = BotVideoSource.WebRTC("ws://your-gpu-server/webrtc")
+    //        }
+    //    }
     var isUserCamOn by remember { mutableStateOf(false) }
+
     val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
             isUserCamOn = true
-            botVideoSource = BotVideoSource.LocalSample // 占位视频先显示
-            // TODO: 替换为真实地址时改成:
-            // botVideoSource = BotVideoSource.WebRTC("ws://your-gpu-server/webrtc")
+        } else {
+            isUserCamOn = false
         }
     }
 
@@ -244,6 +290,9 @@ fun LiveVoiceScreen(
                 delay(3000)
                 errorMessage = ""
             }
+        }
+        controller.onFinalAiReply = { aiText ->
+            generateAiVideo(aiText)
         }
     }
 
@@ -311,22 +360,31 @@ fun LiveVoiceScreen(
             modifier = Modifier.align(Alignment.TopCenter)
         )
 
-        // 3. 中央区域 — 有视频时显示 bot 视频，否则显示能量球
-        if (botVideoSource == BotVideoSource.None) {
-            CentralEnergyBall(
-                isAISpeaking = isAISpeaking,
-                modifier = Modifier.align(Alignment.Center)
-            )
-        } else {
-            BotVideoArea(
-                source = botVideoSource,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .height(360.dp)
-                    .clip(RoundedCornerShape(20.dp))
-            )
+        // 3. 中央区域 — 无视频时显示能量球，有主画面内容时显示 BotVideoArea
+        var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
+
+        when (botVideoSource) {
+            is BotVideoSource.None -> {
+                CentralEnergyBall(
+                    isAISpeaking = isAISpeaking,
+                    modifier = Modifier.align(Alignment.Center)
+                )
+            }
+
+            is BotVideoSource.AvatarImage,
+            is BotVideoSource.LocalSample,
+            is BotVideoSource.RemoteVideo -> {
+                BotVideoArea(
+                    source = botVideoSource,
+                    characterImageUri = selectedCharacterImageUri,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp)
+                        .height(360.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                )
+            }
         }
 
         // 4. 字幕区域（能量球下方）
@@ -489,23 +547,21 @@ fun LiveVoiceScreen(
                 showEndCallDialog = true
             },
             isVideoOn = botVideoSource != BotVideoSource.None,
-            onVideoToggle = {
-                if (botVideoSource == BotVideoSource.None) {
+                onVideoToggle = {
                     val hasCamera = ContextCompat.checkSelfPermission(
                         context, Manifest.permission.CAMERA
                     ) == PackageManager.PERMISSION_GRANTED
-                    if (hasCamera) {
-                        isUserCamOn = true
-                        botVideoSource = BotVideoSource.LocalSample
-                        // TODO: botVideoSource = BotVideoSource.WebRTC("ws://your-gpu-server/webrtc")
+
+                    if (!isUserCamOn) {
+                        if (hasCamera) {
+                            isUserCamOn = true
+                        } else {
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        }
                     } else {
-                        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        isUserCamOn = false
                     }
-                } else {
-                    isUserCamOn = false
-                    botVideoSource = BotVideoSource.None
-                }
-            },
+                },
             modifier = Modifier.fillMaxWidth()
         )
         } // end Column
@@ -1176,13 +1232,74 @@ fun CameraPreviewView(modifier: Modifier = Modifier) {
  * Switches between local sample video (placeholder) and live WebRTC stream.
  * Wire up BotVideoSource.WebRTC when your GPU server's signaling URL is ready.
  */
+//@Composable
+// fun BotVideoArea(source: BotVideoSource, modifier: Modifier = Modifier) {
+//    when (source) {
+//        is BotVideoSource.None -> {} // shouldn't reach here — energy ball is shown instead
+//        is BotVideoSource.LocalSample -> LocalSampleVideoView(modifier = modifier)
+//        is BotVideoSource.WebRTC -> WebRTCVideoView(signalingUrl = source.signalingUrl, modifier = modifier)
+//    }
+//}
 @Composable
-fun BotVideoArea(source: BotVideoSource, modifier: Modifier = Modifier) {
+fun BotVideoArea(
+    source: BotVideoSource,
+    characterImageUri: Uri?,
+    modifier: Modifier = Modifier
+) {
     when (source) {
-        is BotVideoSource.None -> {} // shouldn't reach here — energy ball is shown instead
-        is BotVideoSource.LocalSample -> LocalSampleVideoView(modifier = modifier)
-        is BotVideoSource.WebRTC -> WebRTCVideoView(signalingUrl = source.signalingUrl, modifier = modifier)
+        is BotVideoSource.None -> {}
+
+        is BotVideoSource.AvatarImage -> {
+            if (characterImageUri != null) {
+                AsyncImage(
+                    model = characterImageUri,
+                    contentDescription = "Character Image",
+                    modifier = modifier,
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(modifier = modifier.background(Color.DarkGray))
+            }
+        }
+
+        is BotVideoSource.LocalSample -> {
+            LocalSampleVideoView(modifier = modifier)
+        }
+
+        is BotVideoSource.RemoteVideo -> {
+            RemoteVideoView(
+                videoUrl = source.url,
+                modifier = modifier
+            )
+        }
     }
+}
+
+@Composable
+fun RemoteVideoView(videoUrl: String, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val exoPlayer = remember(videoUrl) {
+        ExoPlayer.Builder(context).build().apply {
+            setMediaItem(MediaItem.fromUri(videoUrl))
+            repeatMode = Player.REPEAT_MODE_ONE
+            playWhenReady = true
+            prepare()
+        }
+    }
+
+    DisposableEffect(exoPlayer) {
+        onDispose { exoPlayer.release() }
+    }
+
+    AndroidView(
+        factory = { ctx ->
+            PlayerView(ctx).apply {
+                player = exoPlayer
+                useController = false
+            }
+        },
+        modifier = modifier
+    )
 }
 
 /** Loop bot_sample.mp4 as a placeholder for the bot's video feed */

@@ -12,22 +12,8 @@ package com.example.chatpart.api
  *   BotVideoSource.WebRTC(signalingUrl = "ws://your-gpu-server/webrtc")
  */
 sealed interface BotVideoSource {
-    /** No video — show animated energy ball */
     data object None : BotVideoSource
-
-    /** Loop local sample.mp4 as placeholder */
+    data object AvatarImage : BotVideoSource
     data object LocalSample : BotVideoSource
-
-    /**
-     * Live WebRTC stream from GPU server.
-     *
-     * Signaling protocol (JSON over WebSocket):
-     *   Client → Server: {"type": "offer",  "sdp": "..."}
-     *   Server → Client: {"type": "answer", "sdp": "..."}
-     *   Bidirectional:   {"type": "ice", "candidate": "...", "sdpMid": "...", "sdpMLineIndex": 0}
-     *
-     * @param signalingUrl  WebSocket URL of your signaling server
-     *                      e.g. "ws://192.168.1.100:8080/webrtc"
-     */
-    data class WebRTC(val signalingUrl: String) : BotVideoSource
+    data class RemoteVideo(val url: String) : BotVideoSource
 }
