@@ -65,6 +65,7 @@ import com.example.chatpart.screens.LanguageSelectionScreen
 import com.example.chatpart.screens.VoiceCloneScreen
 import com.example.chatpart.screens.VoiceManagementScreen
 import com.example.chatpart.screens.LiveVoiceScreen
+import com.example.chatpart.screens.CreateCharacterScreen
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
@@ -138,12 +139,14 @@ class MainActivity : ComponentActivity() {
         const val PAGE_VOICE_CLONE = 11
         const val PAGE_VOICE_MANAGEMENT = 12
         const val PAGE_LIVE_VOICE = 13
+        const val PAGE_CREATE_CHARACTER = 14  // New unified Create Character Wizard
 
         // Onboarding pages set (for filtering in goBack)
         val ONBOARDING_PAGES = setOf(
             PAGE_ONBOARDING_1, PAGE_ONBOARDING_2, PAGE_LOGIN,
             PAGE_LANGUAGE_SELECT, PAGE_GENDER_SELECT,
-            PAGE_AVATAR_SELECT, PAGE_CHARACTER_BASIC, PAGE_CHARACTER_DETAIL
+            PAGE_AVATAR_SELECT, PAGE_CHARACTER_BASIC, PAGE_CHARACTER_DETAIL,
+            PAGE_CREATE_CHARACTER
         )
     }
 
@@ -168,6 +171,9 @@ class MainActivity : ComponentActivity() {
             // Hoist selectedTab here so it survives navigation away and back
             // (if kept inside MainTabScreen, it resets to 0/Chat every time you return)
             var mainSelectedTab by remember { mutableIntStateOf(0) }
+            // For ChatScreen: remember which bot was specifically targeted (e.g. from history or manager)
+            // Hoisted here to survive navigation away and back to PAGE_MAIN.
+            var chatTargetBotId by remember { mutableStateOf<String?>(null) }
             val context = LocalContext.current
             val manager = remember { OnboardingManager(context) }
             val authManager = remember { GoogleAuthManager(context) }
@@ -345,15 +351,19 @@ class MainActivity : ComponentActivity() {
                             onSelectCharacter = { profile ->
                                 characterStorage.saveSelectedCharacterId(profile.id)
                                 selectedCharacter = profile
+                                // Ensure ChatScreen switches to this custom character
+                                chatTargetBotId = "custom_${profile.id}"
+                                // When selecting a character from the list, ALWAYS switch to Chat tab
+                                mainSelectedTab = 0
                                 navigateTo(PAGE_MAIN)
                             },
                             onCreateNew = {
                                 editingCharacter = null
-                                navigateTo(PAGE_CHARACTER_EDITOR)
+                                navigateTo(PAGE_CREATE_CHARACTER)
                             },
                             onEdit = { profile ->
                                 editingCharacter = profile
-                                navigateTo(PAGE_CHARACTER_EDITOR)
+                                navigateTo(PAGE_CREATE_CHARACTER)
                             },
                             onDelete = { profile ->
                                 characterStorage.deleteCharacter(profile.id)
@@ -417,91 +427,69 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                     }
+                    PAGE_CREATE_CHARACTER -> {
+                        CreateCharacterScreen(
+                            isDarkMode = isDarkMode,
+                            existingProfile = editingCharacter,
+                            onSave = { profile ->
+                                val isNew = editingCharacter == null
+                                if (isNew) {
+                                    characterStorage.addCharacter(profile)
+                                    characterStorage.saveSelectedCharacterId(profile.id)
+                                    selectedCharacter = profile
+                                } else {
+                                    characterStorage.updateCharacter(profile)
+                                }
+                                characters = characterStorage.loadCharacters()
+                                
+                                if (!manager.isCompleted()) {
+                                    completeOnboardingAndGoToMain()
+                                } else if (isNew) {
+                                    // NEW character creation — go straight to chat as requested
+                                    chatTargetBotId = "custom_${profile.id}"
+                                    mainSelectedTab = 0
+                                    navigateTo(PAGE_MAIN)
+                                } else {
+                                    // Edited existing — return to character list screen
+                                    goBack(PAGE_CHARACTER_LIST)
+                                }
+                            },
+                            onCancel = {
+                                if (manager.isCompleted()) {
+                                    navigateTo(PAGE_CHARACTER_LIST)
+                                } else {
+                                    navigateTo(PAGE_LANGUAGE_SELECT)
+                                }
+                            }
+                        )
+                    }
                     // New onboarding flow pages
                     PAGE_LANGUAGE_SELECT -> {
                         LanguageSelectionScreen(
                             isDarkMode = isDarkMode,
                             onLanguageSelected = { langCode ->
-                                navigateTo(PAGE_GENDER_SELECT)
+                                navigateTo(PAGE_CREATE_CHARACTER)
                             },
                             onSkip = {
-                                navigateTo(PAGE_GENDER_SELECT)
+                                navigateTo(PAGE_CREATE_CHARACTER)
                             }
                         )
                     }
                     PAGE_GENDER_SELECT -> {
-                        GenderSelectionScreen(
-                            isDarkMode = isDarkMode,
-                            onGenderSelected = { gender ->
-                                onboardingGender = gender
-                                navigateTo(PAGE_AVATAR_SELECT)
-                            },
-                            onSkip = {
-                                navigateTo(if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN)
-                            }
-                        )
+                        // Redirect to unified Create Character Wizard
+                        navigateTo(PAGE_CREATE_CHARACTER)
                     }
                     PAGE_AVATAR_SELECT -> {
-                        AvatarSelectionScreen(
-                            isDarkMode = isDarkMode,
-                            selectedGender = onboardingGender ?: "其他",
-                            onAvatarSelected = { avatar ->
-                                onboardingAvatar = avatar
-                                navigateTo(PAGE_CHARACTER_BASIC)
-                            },
-                            onBack = {
-                                navigateTo(PAGE_GENDER_SELECT)
-                            },
-                            onSkip = {
-                                navigateTo(if (characters.isEmpty()) PAGE_CHARACTER_LIST else PAGE_MAIN)
-                            }
-                        )
+                        // Redirect to unified Create Character Wizard
+                        navigateTo(PAGE_CREATE_CHARACTER)
                     }
                     PAGE_CHARACTER_BASIC -> {
-                        CharacterBasicScreen(
-                            isDarkMode = isDarkMode,
-                            selectedGender = onboardingGender ?: "其他",
-                            selectedAvatar = onboardingAvatar ?: "👤",
-                            onNext = { name, relationship ->
-                                onboardingName = name
-                                onboardingRelationship = relationship
-                                navigateTo(PAGE_CHARACTER_DETAIL)
-                            },
-                            onBack = {
-                                navigateTo(PAGE_AVATAR_SELECT)
-                            },
-                            onSkip = {
-                                navigateTo(PAGE_CHARACTER_LIST)
-                            }
-                        )
+                        // Redirect to unified Create Character Wizard
+                        navigateTo(PAGE_CREATE_CHARACTER)
                     }
                     PAGE_CHARACTER_DETAIL -> {
-                        val basicProfile = Profile(
-                            id = "char_${UUID.randomUUID()}",
-                            name = onboardingName,
-                            gender = onboardingGender ?: "其他",
-                            relationship = onboardingRelationship,
-                            background = "",
-                            personality = "",
-                            customAvatarPath = onboardingAvatar
-                        )
-                        CharacterDetailScreen(
-                            isDarkMode = isDarkMode,
-                            basicProfile = basicProfile,
-                            onSave = { profile ->
-                                pendingVoiceCloneProfile = profile
-                                voiceCloneFromOnboarding = true
-                                navigateTo(PAGE_VOICE_CLONE)
-                            },
-                            onBack = {
-                                navigateTo(PAGE_CHARACTER_BASIC)
-                            },
-                            onSkip = {
-                                pendingVoiceCloneProfile = basicProfile
-                                voiceCloneFromOnboarding = true
-                                navigateTo(PAGE_VOICE_CLONE)
-                            }
-                        )
+                        // Redirect to unified Create Character Wizard
+                        navigateTo(PAGE_CREATE_CHARACTER)
                     }
                     PAGE_VOICE_CLONE -> {
                         if (userVoiceManager == null) {
@@ -608,8 +596,10 @@ class MainActivity : ComponentActivity() {
                                 currentVoiceCallCharacter = selectedCharacter
                                 navigateTo(PAGE_LIVE_VOICE)
                             },
-                            selectedTab = mainSelectedTab,
-                            onSelectedTabChange = { mainSelectedTab = it }
+                            mainSelectedTab = mainSelectedTab,
+                            onSelectedTabChange = { mainSelectedTab = it },
+                            chatTargetBotId = chatTargetBotId,
+                            onChatTargetBotIdChange = { chatTargetBotId = it }
                         )
                     }
                 }
@@ -633,8 +623,10 @@ fun MainTabScreen(
     currentLanguage: String = "zh",
     onLanguageChange: (String) -> Unit = {},
     onNavigateToLiveVoice: () -> Unit = {},
-    selectedTab: Int = 0,
-    onSelectedTabChange: (Int) -> Unit = {}
+    mainSelectedTab: Int = 0,
+    onSelectedTabChange: (Int) -> Unit = {},
+    chatTargetBotId: String? = null,
+    onChatTargetBotIdChange: (String?) -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -645,9 +637,6 @@ fun MainTabScreen(
         TabItem(t("HISTORY"), Icons.Filled.History, Icons.Outlined.History),
         TabItem(t("SETTINGS"), Icons.Filled.Settings, Icons.Outlined.Settings)
     )
-    // selectedTab is hoisted to MainActivity to survive navigation away/back
-    // Do NOT use local remember here - it would reset to 0 (Chat) every time we return
-    var chatTargetBotId by remember { mutableStateOf<String?>(null) }
 
     // Theme-aware colors
     val navBarColor = if (isDarkMode) Color(0xFF1E1E1E) else Color.White
@@ -657,22 +646,23 @@ fun MainTabScreen(
         bottomBar = {
             NavigationBar(
                 containerColor = navBarColor,
-                tonalElevation = 0.dp
+                contentColor = navBarContentColor,
+                tonalElevation = 8.dp
             ) {
                 tabs.forEachIndexed { index, tab ->
                     NavigationBarItem(
-                        selected = selectedTab == index,
+                        selected = mainSelectedTab == index,
                         onClick = { onSelectedTabChange(index) },
                         icon = {
                             Icon(
-                                imageVector = if (selectedTab == index) tab.selectedIcon else tab.unselectedIcon,
+                                imageVector = if (mainSelectedTab == index) tab.selectedIcon else tab.unselectedIcon,
                                 contentDescription = tab.title
                             )
                         },
                         label = {
                             Text(
                                 tab.title,
-                                fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal,
+                                fontWeight = if (mainSelectedTab == index) FontWeight.Bold else FontWeight.Normal,
                                 fontSize = 12.sp
                             )
                         },
@@ -697,13 +687,12 @@ fun MainTabScreen(
         val screenHeightPx = configuration.screenHeightDp * density.density
         val bottomPaddingPx = with(density) { innerPadding.calculateBottomPadding().toPx() }
         val topPaddingPx = with(density) { innerPadding.calculateTopPadding().toPx() }
-        // 可拖动范围：屏幕宽高减去 padding 和按钮自身尺寸
+        
         val maxDragX = screenWidthPx - buttonSizePx
         val maxDragY = screenHeightPx - topPaddingPx - bottomPaddingPx - buttonSizePx
         val defaultOffsetX = screenWidthPx - buttonSizePx - with(density) { 16.dp.toPx() }
         val defaultOffsetY = with(density) { 16.dp.toPx() }
 
-        // 从 SharedPreferences 恢复保存的位置
         val uiPreferences = remember { UIPreferences(context) }
         val savedOffsetX = uiPreferences.getCallButtonOffsetX()
         val savedOffsetY = uiPreferences.getCallButtonOffsetY()
@@ -715,7 +704,7 @@ fun MainTabScreen(
         val haptic = LocalHapticFeedback.current
 
         Box(modifier = Modifier.padding(innerPadding)) {
-            when (selectedTab) {
+            when (mainSelectedTab) {
                 0 -> ChatScreen(
                     currentUser = currentUser,
                     personChat = personChat,
@@ -729,8 +718,7 @@ fun MainTabScreen(
                     isDarkMode = isDarkMode,
                     characters = customCharacters,
                     onChatClick = { characterId ->
-                        chatTargetBotId = characterId
-                        // Find the character by ID (handle "custom_" prefix)
+                        onChatTargetBotIdChange(characterId)
                         val actualId = if (characterId.startsWith("custom_")) {
                             characterId.removePrefix("custom_")
                         } else {
@@ -740,7 +728,6 @@ fun MainTabScreen(
                         if (character != null) {
                             onSelectCharacter(character)
                         } else {
-                            // Handle default bots (assistant, teacher, coding)
                             val defaultBotProfile = when (characterId) {
                                 "assistant" -> Profile(
                                     id = "assistant",
@@ -781,7 +768,6 @@ fun MainTabScreen(
                                 onSelectCharacter(defaultBotProfile)
                             }
                         }
-                        // Switch to Chat tab
                         onSelectedTabChange(0)
                     }
                 )
@@ -797,8 +783,6 @@ fun MainTabScreen(
                 )
             }
 
-            // 可拖动 Live Voice 浮动按钮
-            // 修复：pointerInput 和 offset 只作用于按钮大小的 Box，不拦截全屏触摸
             Box(
                 modifier = Modifier
                     .size(buttonSize)
@@ -812,7 +796,6 @@ fun MainTabScreen(
                                 change.consume()
                                 buttonOffsetX = (buttonOffsetX + dragAmount.x).coerceIn(0f, maxDragX)
                                 buttonOffsetY = (buttonOffsetY + dragAmount.y).coerceIn(0f, maxDragY)
-                                // 保存位置到 SharedPreferences（异步，不会阻塞 UI）
                                 uiPreferences.setCallButtonOffset(buttonOffsetX, buttonOffsetY)
                             }
                         )
