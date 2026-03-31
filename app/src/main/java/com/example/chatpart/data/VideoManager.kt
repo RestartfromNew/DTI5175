@@ -3,18 +3,19 @@ package com.example.chatpart.data
 import android.util.Log
 import com.example.chatpart.api.GenerateVideoRequest
 import com.example.chatpart.api.GenerateVideoResponse
+import com.example.chatpart.api.UploadVoiceAndTextResponse
 import com.example.chatpart.api.VideoClient
 import com.example.chatpart.domain.Profile
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.File
 
 class VideoManager {
 
-    suspend fun uploadAvatar(localAvatarPath: String): String {
+    suspend fun uploadAvatar(localAvatarPath: String, characterId: String): String {
         val file = File(localAvatarPath)
-
         require(file.exists()) { "Avatar file does not exist: $localAvatarPath" }
 
         val requestFile = file.asRequestBody("image/*".toMediaTypeOrNull())
@@ -24,9 +25,42 @@ class VideoManager {
             body = requestFile
         )
 
-        val response = VideoClient.api.uploadAvatar(avatarPart)
-        Log.d("AvatarDebug", "server avatar_path = ${response.avatar_path}")
+        val characterIdBody = characterId.toRequestBody("text/plain".toMediaTypeOrNull())
+
+        val response = VideoClient.api.uploadAvatar(avatarPart, characterIdBody)
         return response.avatar_path
+    }
+
+    suspend fun uploadVoiceReference(
+        localVoicePath: String,
+        characterId: String,
+        transcript: String
+    ): UploadVoiceAndTextResponse {
+        val file = File(localVoicePath)
+
+        require(file.exists()) { "Voice file does not exist: $localVoicePath" }
+        require(transcript.isNotBlank()) { "Transcript is blank" }
+
+        val requestFile = file.asRequestBody("audio/wav".toMediaTypeOrNull())
+        val voicePart = MultipartBody.Part.createFormData(
+            name = "voice",
+            filename = file.name,
+            body = requestFile
+        )
+
+        val characterIdBody = characterId.toRequestBody("text/plain".toMediaTypeOrNull())
+        val transcriptBody = transcript.toRequestBody("text/plain".toMediaTypeOrNull())
+
+        val response = VideoClient.api.uploadVoiceReference(
+            voice = voicePart,
+            characterId = characterIdBody,
+            transcript = transcriptBody
+        )
+
+        Log.d("VoiceDebug", "server character_voice = ${response.character_voice}")
+        Log.d("VoiceDebug", "server character_txt = ${response.character_txt}")
+
+        return response
     }
 
     suspend fun generateVideo(profile: Profile, replyText: String): GenerateVideoResponse {
@@ -41,7 +75,7 @@ class VideoManager {
 
         if (!profile.customAvatarPath.isNullOrBlank()) {
             try {
-                serverAvatarPath = uploadAvatar(profile.customAvatarPath)
+                serverAvatarPath = uploadAvatar(profile.customAvatarPath, profile.id)
             } catch (e: Exception) {
                 Log.e("AvatarDebug", "upload avatar failed: ${e.message}", e)
             }

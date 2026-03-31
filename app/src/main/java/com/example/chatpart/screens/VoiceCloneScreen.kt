@@ -45,6 +45,7 @@ import com.example.chatpart.firestore.FirestoreError
 import com.example.chatpart.firestore.UserVoiceManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.i18n.LanguageManager
+import com.example.chatpart.i18n.VoiceCloneManager
 import com.example.chatpart.voice.AudioRecordManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,6 +57,7 @@ fun VoiceCloneScreen(
     isDarkMode: Boolean = false,
     characterName: String,
     characterId: String,
+    avatarPath: String?,
     uid: String, // Firebase user ID for account isolation
     userVoiceManager: UserVoiceManager,
     onVoiceCloned: (voiceId: String) -> Unit,
@@ -542,11 +544,24 @@ fun VoiceCloneScreen(
                         cloneError = null
                         // Launch cloning in background
                         val minimaxManager = MiniMaxVoiceCloneManager(context)
+                        val voiceCloneManager = VoiceCloneManager(context)
                         scope.launch {
                             if (recordedFile != null) {
                                 // SECURITY: Pass uid for account isolation in voice_id
-                                val result = minimaxManager.cloneVoice(recordedFile!!, characterName, uid)
+                                val result = minimaxManager.cloneVoice(recordedFile!!, characterId, uid)
                                 result.onSuccess { voiceId ->
+                                    scope.launch {
+                                        try {
+                                            val uploadResult = voiceCloneManager.uploadReferenceAssets(
+                                                audioFile = recordedFile!!,
+                                                characterId = characterId,
+                                                avatarPath = avatarPath
+                                            )
+                                            Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
+                                        } catch (e: Exception) {
+                                            Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
+                                        }
+                                    }
                                     // Prepare voice data for Firestore
                                     val voice = ClonedVoice(
                                         id = UUID.randomUUID().toString(),

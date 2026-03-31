@@ -199,14 +199,9 @@ fun LiveVoiceScreen(
     fun generateAiVideo(replyText: String) {
         scope.launch {
             try {
-                android.util.Log.d("AvatarDebug", "generateAiVideo called, replyText = $replyText")
-
                 val result = videoManager.generateVideo(character, replyText)
-                val fullVideoUrl = VideoClient.fullMediaUrl(result.video_url)
-
-                android.util.Log.d("AvatarDebug", "video generated url = $fullVideoUrl")
-
-                botVideoSource = BotVideoSource.RemoteVideo(fullVideoUrl)
+                val videoUrl = result.video_url
+                botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
             } catch (e: Exception) {
                 android.util.Log.e("AvatarDebug", "generateAiVideo failed: ${e.message}", e)
             }

@@ -499,43 +499,44 @@ class MainActivity : ComponentActivity() {
                             // SECURITY: Pass uid for account isolation in voice_id
                             val currentUid = currentUser?.uid ?: ""
                             VoiceCloneScreen(
-                            isDarkMode = isDarkMode,
-                            characterName = pendingVoiceCloneProfile?.name ?: "Character",
-                            characterId = pendingVoiceCloneProfile?.id ?: "unknown",
-                            uid = currentUid,
-                            userVoiceManager = manager,
-                            onVoiceCloned = { voiceId ->
-                                val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
-                                if (profile != null) {
-                                    characterStorage.addCharacter(profile)
-                                    characters = characterStorage.loadCharacters()
-                                    characterStorage.saveSelectedCharacterId(profile.id)
-                                    selectedCharacter = profile
-                                }
-                                if (voiceCloneFromOnboarding) {
-                                    completeOnboardingAndGoToMain()
-                                } else {
+                                isDarkMode = isDarkMode,
+                                characterName = pendingVoiceCloneProfile?.name ?: "Character",
+                                characterId = pendingVoiceCloneProfile?.id ?: "unknown",
+                                avatarPath = pendingVoiceCloneProfile?.customAvatarPath,
+                                uid = currentUid,
+                                userVoiceManager = manager,
+                                onVoiceCloned = { voiceId ->
+                                    val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
+                                    if (profile != null) {
+                                        characterStorage.addCharacter(profile)
+                                        characters = characterStorage.loadCharacters()
+                                        characterStorage.saveSelectedCharacterId(profile.id)
+                                        selectedCharacter = profile
+                                    }
+                                    if (voiceCloneFromOnboarding) {
+                                        completeOnboardingAndGoToMain()
+                                    } else {
+                                        goBack()
+                                    }
+                                },
+                                onSkip = {
+                                    val profile = pendingVoiceCloneProfile
+                                    if (profile != null) {
+                                        characterStorage.addCharacter(profile)
+                                        characters = characterStorage.loadCharacters()
+                                        characterStorage.saveSelectedCharacterId(profile.id)
+                                        selectedCharacter = profile
+                                    }
+                                    if (voiceCloneFromOnboarding) {
+                                        completeOnboardingAndGoToMain()
+                                    } else {
+                                        goBack()
+                                    }
+                                },
+                                onBack = {
                                     goBack()
                                 }
-                            },
-                            onSkip = {
-                                val profile = pendingVoiceCloneProfile
-                                if (profile != null) {
-                                    characterStorage.addCharacter(profile)
-                                    characters = characterStorage.loadCharacters()
-                                    characterStorage.saveSelectedCharacterId(profile.id)
-                                    selectedCharacter = profile
-                                }
-                                if (voiceCloneFromOnboarding) {
-                                    completeOnboardingAndGoToMain()
-                                } else {
-                                    goBack()
-                                }
-                            },
-                            onBack = {
-                                goBack()
-                            }
-                        )
+                            )
                         }
                     }
                     PAGE_VOICE_MANAGEMENT -> {
