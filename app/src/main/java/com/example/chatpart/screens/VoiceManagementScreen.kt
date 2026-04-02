@@ -35,6 +35,7 @@ import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.data.DefaultVoice
 import com.example.chatpart.data.DefaultVoices
 import com.example.chatpart.data.SlotStatus
+import com.example.chatpart.data.ChatHistoryManager
 import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.firestore.FirestoreError
@@ -56,7 +57,8 @@ fun VoiceManagementScreen(
     onNavigateToVoiceClone: () -> Unit,
     onNavigateToPurchase: () -> Unit,
     onBack: () -> Unit,
-    onVoicesChanged: () -> Unit = {}
+    onVoicesChanged: () -> Unit = {},
+    chatHistoryManager: ChatHistoryManager? = null
 ) {
     // Theme-aware colors
     val backgroundColor = if (isDarkMode) Color(0xFF1C1B1F) else SoftWhite
@@ -138,13 +140,21 @@ fun VoiceManagementScreen(
 
             // MiniMax API (optional — offline-tolerant)
             voiceCloneManager.fetchClonedVoices()
-                .onSuccess { ids -> combined.addAll(ids) }
+                .onSuccess { ids -> 
+                    // SECURITY: Filter only voices owned by THIS user's uid
+                    val currentUid = userVoiceManager.uid
+                    val ownedIds = ids.filter { voiceCloneManager.isVoiceOwnedByUser(it, currentUid) }
+                    combined.addAll(ownedIds) 
+                }
                 .onFailure { e -> Log.w("VoiceManagement", "MiniMax sync failed: ${e.message}") }
 
             // Firestore voices (already scoped to this user's uid document)
             userVoiceManager.getClonedVoices()
                 .onSuccess { voices ->
-                    voices.map { it.voiceId }.filter { it.isNotEmpty() }.forEach { combined.add(it) }
+                    voices.map { it.voiceId }
+                        .filter { it.isNotEmpty() }
+                        .filter { voiceCloneManager.isVoiceOwnedByUser(it, userVoiceManager.uid) } // Extra safety
+                        .forEach { combined.add(it) }
                 }
                 .onFailure { e -> Log.w("VoiceManagement", "Firestore voice sync failed: ${e.message}") }
 
@@ -710,8 +720,11 @@ fun VoiceManagementScreen(
                 allCharacters.forEach { char ->
                     if (char.id in selectedCharacterIds) {
                         voiceAssignmentPrefs.setVoiceId(char.id, voiceId)
+                        // Clear physical audio cache for linked character to force fresh generation
+                        chatHistoryManager?.clearVoiceFiles("custom_${char.id}")
                     } else if (voiceAssignments[char.id] == voiceId) {
                         voiceAssignmentPrefs.setVoiceId(char.id, null)
+                        chatHistoryManager?.clearVoiceFiles("custom_${char.id}")
                     }
                 }
                 refreshAssignments()

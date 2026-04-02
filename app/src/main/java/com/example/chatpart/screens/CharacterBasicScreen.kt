@@ -30,6 +30,8 @@ fun CharacterBasicScreen(
     isDarkMode: Boolean = false,
     selectedGender: String,
     selectedAvatar: String,
+    initialName: String = "",
+    initialRelationship: String = "",
     onNext: (name: String, relationship: String) -> Unit,
     onBack: () -> Unit,
     onSkip: () -> Unit
@@ -42,8 +44,8 @@ fun CharacterBasicScreen(
     val hintColor = if (isDarkMode) Color(0xFFAAAAAA) else Color.Gray
     val peachColor = Peach
 
-    var name by remember { mutableStateOf("") }
-    var relationship by remember { mutableStateOf("") }
+    var name by remember(initialName) { mutableStateOf(initialName) }
+    var relationship by remember(initialRelationship) { mutableStateOf(initialRelationship) }
 
     val isFormValid = name.isNotBlank() && relationship.isNotBlank()
 

@@ -196,12 +196,14 @@ fun LiveVoiceScreen(
     var currentCharacter by remember { mutableStateOf(character) }
     var showCharacterPicker by remember { mutableStateOf(false) }
 
+    var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.None) }
+    var lastGeneratedVideoUrl by remember { mutableStateOf<String?>(null) }
+
     // Select character
     val selectedCharacterImageUri = remember(currentCharacter.customAvatarPath) {
         android.util.Log.d("AvatarDebug", "customAvatarPath = ${currentCharacter.customAvatarPath}")
         currentCharacter.customAvatarPath?.let { Uri.parse(it) }
     }
-    var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
 
     //test
     val videoManager = remember { VideoManager() }
@@ -212,8 +214,16 @@ fun LiveVoiceScreen(
                 android.util.Log.d("AvatarDebug", "generateAiVideo called, replyText = $replyText")
                 val result = videoManager.generateVideo(currentCharacter, replyText)
                 val videoUrl = result.video_url
+<<<<<<< Updated upstream
                 android.util.Log.d("AvatarDebug", "videoUrl = $videoUrl")
                 botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
+=======
+                lastGeneratedVideoUrl = videoUrl
+                // Only auto-show if video is already enabled by user
+                if (botVideoSource != BotVideoSource.None) {
+                    botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
+                }
+>>>>>>> Stashed changes
             } catch (e: Exception) {
                 android.util.Log.e("AvatarDebug", "generateAiVideo failed: ${e.message}", e)
             }
@@ -299,6 +309,7 @@ fun LiveVoiceScreen(
             }
         }
         controller.onFinalAiReply = { aiText ->
+            lastGeneratedVideoUrl = null // Reset for new reply
             generateAiVideo(aiText)
         }
     }
@@ -419,6 +430,7 @@ fun LiveVoiceScreen(
         }
 
         // 3. 中央区域 — 无视频时显示能量球，有主画面内容时显示 BotVideoArea
+<<<<<<< Updated upstream
         // var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
 
         when (botVideoSource) {
@@ -446,6 +458,29 @@ fun LiveVoiceScreen(
                     }
                 )
             }
+=======
+
+        // 3. 中央区域 — 处理视频与语音模式的切换
+        if (botVideoSource == BotVideoSource.None) {
+            // 语音通话模式：纯能量球
+            CentralEnergyBall(
+                isAISpeaking = isAISpeaking,
+                modifier = Modifier.align(Alignment.Center)
+            )
+        } else {
+            // 视频模式开启：显示预留的视频大方框
+            BotVideoArea(
+                source = botVideoSource,
+                characterImageUri = selectedCharacterImageUri,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .height(360.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0x33FFFFFF)) // 即使没内容，也显示一个磨砂质感的背景占位
+            )
+>>>>>>> Stashed changes
         }
 
         // 4. 字幕区域（能量球下方）
@@ -616,11 +651,18 @@ fun LiveVoiceScreen(
                     if (!isUserCamOn) {
                         if (hasCamera) {
                             isUserCamOn = true
+                            // When turning on, show remote video if exists, else show avatar
+                            botVideoSource = if (lastGeneratedVideoUrl != null) {
+                                BotVideoSource.RemoteVideo(lastGeneratedVideoUrl!!)
+                            } else {
+                                BotVideoSource.AvatarImage
+                            }
                         } else {
                             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
                         }
                     } else {
                         isUserCamOn = false
+                        botVideoSource = BotVideoSource.None // Hide bot area, go back to energy ball
                     }
                 },
             modifier = Modifier.fillMaxWidth()

@@ -595,6 +595,7 @@ fun VoiceCloneScreen(
 
                         scope.launch {
                             if (recordedFile != null) {
+<<<<<<< Updated upstream
                                 val result = minimaxManager.cloneVoice(
                                     audioFile = recordedFile!!,
                                     characterId = characterId,
@@ -614,6 +615,26 @@ fun VoiceCloneScreen(
                                         Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
                                     } catch (e: Exception) {
                                         Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
+=======
+                                // SECURITY: Pass uid for account isolation in voice_id
+                                // 2nd safety: Ensure user document exists (recreates it if manually deleted)
+                        val userEmail = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email ?: "demo@example.com"
+                        userVoiceManager.ensureUserExists(userEmail)
+                        
+                        val result = minimaxManager.cloneVoice(recordedFile!!, characterId, uid)
+                                result.onSuccess { voiceId ->
+                                    scope.launch {
+                                        try {
+                                            val uploadResult = voiceCloneManager.uploadReferenceAssets(
+                                                audioFile = recordedFile!!,
+                                                characterId = characterId,
+                                                avatarPath = avatarPath
+                                            )
+                                            Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
+                                        } catch (e: Exception) {
+                                            Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
+                                        }
+>>>>>>> Stashed changes
                                     }
 
                                     val voice = ClonedVoice(

@@ -439,7 +439,7 @@ fun ChatScreen(
                                 }
                                 val filePath = audioClient.textToVoice(
                                     text = text,
-                                    voiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.id)
+                                    voiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.profileId ?: selectedBot.id)
                                         ?: selectedBot.voiceId
                                         ?: resolveProfile()?.voiceId
                                         ?: "English_Graceful_Lady",
@@ -465,7 +465,10 @@ fun ChatScreen(
                     },
                     onStt = { voiceMessage ->
                         val filePath = voiceMessage.voiceFilePath
-                        if (!filePath.isNullOrBlank()) {
+                        val file = filePath?.let { java.io.File(it) }
+                        
+                        if (file != null && file.exists()) {
+                            // File exists — just play it
                             scope.launch {
                                 try {
                                     mediaPlayer.reset()
@@ -475,6 +478,39 @@ fun ChatScreen(
                                     mediaPlayer.start()
                                 } catch (e: Exception) {
                                     Log.e("VoicePlayback", "Playback failed: ${e.message}")
+                                }
+                            }
+                        } else {
+                            // File is missing (maybe cleared because of voice change)! 
+                            // AUTO-REGENERATE on demand with THE LATEST voice_id
+                            scope.launch {
+                                try {
+                                    // 1. Indicate loading on this bubble (handled by refreshing the state)
+                                    // 2. Generate with current voice settings
+                                    val newFilePath = audioClient.textToVoice(
+                                        text = voiceMessage.subtitle ?: voiceMessage.text,
+                                        voiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.profileId ?: selectedBot.id)
+                                            ?: selectedBot.voiceId
+                                            ?: resolveProfile()?.voiceId
+                                            ?: "English_Graceful_Lady",
+                                        emotion = "happy",
+                                        languageBoost = if (currentLanguage == "zh") "Chinese" else ""
+                                    )
+                                    
+                                    // 3. Update the messages list so the new path is persisted
+                                    messages = messages.map { msg ->
+                                        if (msg.id == voiceMessage.id) msg.copy(voiceFilePath = newFilePath)
+                                        else msg
+                                    }
+                                    
+                                    // 4. Play the new file
+                                    mediaPlayer.reset()
+                                    mediaPlayer.setDataSource(newFilePath)
+                                    mediaPlayer.prepare()
+                                    mediaPlayer.start()
+                                } catch (e: Exception) {
+                                    Log.e("VoiceRegeneration", "Failed to regenerate voice: ${e.message}")
+                                    Toast.makeText(context, "Voice missing — reconstruction failed.", Toast.LENGTH_SHORT).show()
                                 }
                             }
                         }

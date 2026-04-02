@@ -104,12 +104,32 @@ class ChatHistoryManager(private val context: Context) {
 
     // Clear messages for a specific character
     fun clearMessages(characterId: String) {
+        // Also clear physical voice files first
+        clearVoiceFiles(characterId)
+        
         prefs.edit()
             .remove("messages_$characterId")
             .remove("count_$characterId")
             .remove("timestamp_$characterId")
             .remove("last_message_$characterId")
             .apply()
+    }
+
+    // Explicitly clear physical voice files for an ID without deleting the chat log
+    fun clearVoiceFiles(characterId: String) {
+        val messages = loadMessages(characterId)
+        messages.forEach { msg ->
+            if (msg.isVoice && !msg.voiceFilePath.isNullOrBlank()) {
+                try {
+                    val file = java.io.File(msg.voiceFilePath)
+                    if (file.exists()) {
+                        file.delete()
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 
     // Clear all chat history

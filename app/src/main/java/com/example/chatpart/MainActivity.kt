@@ -68,6 +68,7 @@ import com.example.chatpart.screens.SlotPurchaseScreen
 import com.example.chatpart.screens.LiveVoiceScreen
 import com.example.chatpart.screens.CreateCharacterScreen
 import com.example.chatpart.data.CharacterInfo
+import com.example.chatpart.data.ChatHistoryManager
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.i18n.LanguageManager
@@ -191,6 +192,7 @@ class MainActivity : ComponentActivity() {
             var chatTargetBotId by remember { mutableStateOf<String?>(null) }
             val context = LocalContext.current
             val manager = remember { OnboardingManager(context) }
+            val chatHistoryManager: ChatHistoryManager = remember { ChatHistoryManager(context) }
             val authManager = remember { GoogleAuthManager(context) }
             val langManager = remember { LanguageManager(context) }
             var currentLanguage by remember { mutableStateOf(langManager.getCurrentLanguage()) }
@@ -249,18 +251,11 @@ class MainActivity : ComponentActivity() {
                 // Default behavior: pop current page
                 val newStack = navigationStack.dropLast(1)
 
-                // Filter out onboarding pages if onboarding is completed
-                val filteredStack = if (manager.isCompleted()) {
-                    newStack.dropLastWhile { it in ONBOARDING_PAGES }
-                } else {
-                    newStack
-                }
-
-                return if (filteredStack.isEmpty()) {
+                return if (newStack.isEmpty()) {
                     false // Let finish() handle it
                 } else {
-                    navigationStack = filteredStack
-                    currentPage = filteredStack.last()
+                    navigationStack = newStack
+                    currentPage = newStack.last()
                     true
                 }
             }
@@ -419,10 +414,17 @@ class MainActivity : ComponentActivity() {
                             },
                             onEdit = { profile ->
                                 editingCharacter = profile
-                                navigateTo(PAGE_CREATE_CHARACTER)
+                                // Reset workflow variables to match current profile
+                                onboardingGender = profile.gender
+                                onboardingAvatar = profile.customAvatarPath ?: "👤"
+                                onboardingName = profile.name
+                                onboardingRelationship = profile.relationship
+                                // Enter the beautiful wizard at stage 1
+                                navigateTo(PAGE_GENDER_SELECT)
                             },
                             onDelete = { profile ->
                                 characterStorage.deleteCharacter(profile.id)
+                                chatHistoryManager.clearMessages("custom_${profile.id}")
                                 characters = characterStorage.loadCharacters()
                                 selectedCharacter = characterStorage.getSelectedCharacter() ?: defaultProfile
                             },
@@ -536,12 +538,13 @@ class MainActivity : ComponentActivity() {
                     PAGE_GENDER_SELECT -> {
                         GenderSelectionScreen(
                             isDarkMode = isDarkMode,
+                            initialGender = editingCharacter?.gender,
                             onGenderSelected = { gender ->
                                 onboardingGender = gender
                                 navigateTo(PAGE_AVATAR_SELECT)
                             },
                             onSkip = {
-                                onboardingGender = "其他"
+                                onboardingGender = editingCharacter?.gender ?: "其他"
                                 navigateTo(PAGE_AVATAR_SELECT)
                             }
                         )
@@ -549,14 +552,15 @@ class MainActivity : ComponentActivity() {
                     PAGE_AVATAR_SELECT -> {
                         AvatarSelectionScreen(
                             isDarkMode = isDarkMode,
-                            selectedGender = onboardingGender ?: "其他",
+                            selectedGender = onboardingGender ?: editingCharacter?.gender ?: "其他",
+                            initialAvatar = editingCharacter?.customAvatarPath,
                             onAvatarSelected = { avatar ->
                                 onboardingAvatar = avatar
                                 navigateTo(PAGE_CHARACTER_BASIC)
                             },
                             onBack = { goBack() },
                             onSkip = {
-                                onboardingAvatar = "👤"
+                                onboardingAvatar = editingCharacter?.customAvatarPath ?: "👤"
                                 navigateTo(PAGE_CHARACTER_BASIC)
                             }
                         )
@@ -564,8 +568,10 @@ class MainActivity : ComponentActivity() {
                     PAGE_CHARACTER_BASIC -> {
                         CharacterBasicScreen(
                             isDarkMode = isDarkMode,
-                            selectedGender = onboardingGender ?: "其他",
-                            selectedAvatar = onboardingAvatar ?: "👤",
+                            selectedGender = onboardingGender ?: editingCharacter?.gender ?: "其他",
+                            selectedAvatar = onboardingAvatar ?: editingCharacter?.customAvatarPath ?: "👤",
+                            initialName = onboardingName.ifBlank { editingCharacter?.name ?: "" },
+                            initialRelationship = onboardingRelationship.ifBlank { editingCharacter?.relationship ?: "" },
                             onNext = { name, relationship ->
                                 onboardingName = name
                                 onboardingRelationship = relationship
@@ -573,38 +579,52 @@ class MainActivity : ComponentActivity() {
                             },
                             onBack = { goBack() },
                             onSkip = {
-                                onboardingName = "Character"
-                                onboardingRelationship = "朋友"
+                                onboardingName = editingCharacter?.name ?: "Character"
+                                onboardingRelationship = editingCharacter?.relationship ?: "朋友"
                                 navigateTo(PAGE_CHARACTER_DETAIL)
                             }
                         )
                     }
                     PAGE_CHARACTER_DETAIL -> {
-                        val basicProfile = Profile(
+                        val basicProfile = (editingCharacter ?: Profile(
                             id = "char_${System.currentTimeMillis()}",
                             name = onboardingName.ifBlank { "Character" },
                             gender = onboardingGender ?: "其他",
                             relationship = onboardingRelationship.ifBlank { "朋友" },
                             background = "",
-                            customAvatarPath = onboardingAvatar?.takeIf { it.startsWith("/") }
-                        )
+                            customAvatarPath = onboardingAvatar?.takeIf { it.startsWith("/") || it.length <= 2 }
+                        )).let { base ->
+                            base.copy(
+                                name = onboardingName.ifBlank { base.name.ifBlank { "Character" } },
+                                relationship = onboardingRelationship.ifBlank { base.relationship.ifBlank { "朋友" } },
+                                gender = onboardingGender ?: base.gender,
+                                customAvatarPath = onboardingAvatar?.takeIf { it.isNotEmpty() } ?: base.customAvatarPath
+                            )
+                        }
+
                         val isOnboarding = !manager.isCompleted()
                         CharacterDetailScreen(
                             isDarkMode = isDarkMode,
                             basicProfile = basicProfile,
+                            existingProfile = editingCharacter,
                             onSave = { profile ->
                                 if (isOnboarding) {
                                     pendingVoiceCloneProfile = profile
                                     voiceCloneFromOnboarding = true
                                     navigateTo(PAGE_VOICE_CLONE)
                                 } else {
-                                    characterStorage.addCharacter(profile)
+                                    if (editingCharacter != null) {
+                                        characterStorage.updateCharacter(profile)
+                                    } else {
+                                        characterStorage.addCharacter(profile)
+                                    }
                                     characters = characterStorage.loadCharacters()
-                                    characterStorage.saveSelectedCharacterId(profile.id)
-                                    selectedCharacter = profile
-                                    chatTargetBotId = "custom_${profile.id}"
-                                    mainSelectedTab = 0
-                                    navigateTo(PAGE_MAIN)
+                                    // Redirect based on context
+                                    if (manager.isCompleted()) {
+                                        goBack(PAGE_CHARACTER_LIST)
+                                    } else {
+                                        completeOnboardingAndGoToMain()
+                                    }
                                 }
                             },
                             onBack = { goBack() },
@@ -614,13 +634,18 @@ class MainActivity : ComponentActivity() {
                                     voiceCloneFromOnboarding = true
                                     navigateTo(PAGE_VOICE_CLONE)
                                 } else {
-                                    characterStorage.addCharacter(basicProfile)
+                                    if (editingCharacter != null) {
+                                        characterStorage.updateCharacter(basicProfile)
+                                    } else {
+                                        characterStorage.addCharacter(basicProfile)
+                                    }
                                     characters = characterStorage.loadCharacters()
-                                    characterStorage.saveSelectedCharacterId(basicProfile.id)
-                                    selectedCharacter = basicProfile
-                                    chatTargetBotId = "custom_${basicProfile.id}"
-                                    mainSelectedTab = 0
-                                    navigateTo(PAGE_MAIN)
+                                    // Redirect based on context
+                                    if (manager.isCompleted()) {
+                                        goBack(PAGE_CHARACTER_LIST)
+                                    } else {
+                                        completeOnboardingAndGoToMain()
+                                    }
                                 }
                             }
                         )
@@ -643,6 +668,8 @@ class MainActivity : ComponentActivity() {
                                     val profile = pendingVoiceCloneProfile?.copy(voiceId = voiceId)
                                     if (profile != null) {
                                         characterStorage.addCharacter(profile)
+                                        // Clear any residual voice files before starting fresh
+                                        chatHistoryManager.clearVoiceFiles("custom_${profile.id}")
                                         characters = characterStorage.loadCharacters()
                                         characterStorage.saveSelectedCharacterId(profile.id)
                                         selectedCharacter = profile
@@ -679,33 +706,34 @@ class MainActivity : ComponentActivity() {
                         } else {
                             val manager = userVoiceManager!!
                             VoiceManagementScreen(
-                            isDarkMode = isDarkMode,
-                            currentLanguage = currentLanguage,
-                            characterStorage = characterStorage,
-                            userVoiceManager = manager,
-                            voiceAssignmentPrefs = voiceAssignmentPrefs,
-                            allCharacters = allCharacterInfos,
-                            onNavigateToVoiceClone = {
-                                pendingVoiceCloneProfile = Profile(
-                                    id = "temp_voice_${System.currentTimeMillis()}",
-                                    name = "New Voice",
-                                    gender = "女",
-                                    relationship = "朋友",
-                                    background = ""
-                                )
-                                voiceCloneFromOnboarding = false
-                                navigateTo(PAGE_VOICE_CLONE)
-                            },
-                            onNavigateToPurchase = {
-                                navigateTo(PAGE_SLOT_PURCHASE)
-                            },
-                            onBack = {
-                                goBack()
-                            },
-                            onVoicesChanged = {
-                                characters = characterStorage.loadCharacters()
-                            }
-                        )
+                                isDarkMode = isDarkMode,
+                                currentLanguage = currentLanguage,
+                                characterStorage = characterStorage,
+                                userVoiceManager = manager,
+                                voiceAssignmentPrefs = voiceAssignmentPrefs,
+                                allCharacters = characters.map { CharacterInfo(it.id, it.name, "👤", isDefault = false) },
+                                onNavigateToVoiceClone = {
+                                    pendingVoiceCloneProfile = Profile(
+                                        id = "temp_voice_${System.currentTimeMillis()}",
+                                        name = "New Voice",
+                                        gender = "女",
+                                        relationship = "朋友",
+                                        background = ""
+                                    )
+                                    voiceCloneFromOnboarding = false
+                                    navigateTo(PAGE_VOICE_CLONE)
+                                },
+                                onNavigateToPurchase = {
+                                    navigateTo(PAGE_SLOT_PURCHASE)
+                                },
+                                onBack = {
+                                    goBack()
+                                },
+                                onVoicesChanged = {
+                                    characters = characterStorage.loadCharacters()
+                                },
+                                chatHistoryManager = chatHistoryManager
+                            )
                         }
                     }
                     PAGE_SLOT_PURCHASE -> {
@@ -732,6 +760,7 @@ class MainActivity : ComponentActivity() {
                                 navigateTo(PAGE_CHARACTER_LIST)
                             },
                             onSignOut = {
+                                manager.reset()
                                 authManager.signOut()
                                 currentUser = null
                                 navigateTo(PAGE_LOGIN)

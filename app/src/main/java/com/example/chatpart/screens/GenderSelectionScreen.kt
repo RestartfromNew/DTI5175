@@ -23,6 +23,7 @@ import com.example.chatpart.i18n.LocalizedString
 @Composable
 fun GenderSelectionScreen(
     isDarkMode: Boolean = false,
+    initialGender: String? = null,
     onGenderSelected: (String) -> Unit,
     onSkip: () -> Unit
 ) {
@@ -34,7 +35,7 @@ fun GenderSelectionScreen(
     val hintColor = if (isDarkMode) Color(0xFFAAAAAA) else Color.Gray
     val peachColor = Peach
 
-    var selectedGender by remember { mutableStateOf<String?>(null) }
+    var selectedGender by remember { mutableStateOf<String?>(initialGender) }
 
     Box(
         modifier = Modifier

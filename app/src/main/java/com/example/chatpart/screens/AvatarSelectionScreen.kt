@@ -40,6 +40,7 @@ import java.util.UUID
 fun AvatarSelectionScreen(
     isDarkMode: Boolean = false,
     selectedGender: String,
+    initialAvatar: String? = null,
     onAvatarSelected: (String) -> Unit, // 可以是本地图片路径或emoji
     onBack: () -> Unit,
     onSkip: () -> Unit
@@ -53,8 +54,10 @@ fun AvatarSelectionScreen(
     val peachColor = Peach
 
     val context = LocalContext.current
-    var customAvatarUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedAvatar by remember { mutableStateOf<String?>(null) }
+    var selectedAvatar by remember { mutableStateOf<String?>(initialAvatar) }
+    var customAvatarUri by remember {
+        mutableStateOf<Uri?>(initialAvatar?.takeIf { it.startsWith("/") }?.let { Uri.fromFile(File(it)) })
+    }
 
     // Image picker launcher
     val imagePickerLauncher = rememberLauncherForActivityResult(
@@ -71,6 +74,8 @@ fun AvatarSelectionScreen(
                 }
                 customAvatarUri = Uri.fromFile(file)
                 selectedAvatar = file.absolutePath
+                // MUTUAL EXCLUSION: Clear emoji selection
+                // (Done implicitly as selectedAvatar is now the path, but let's be explicit if needed)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -212,7 +217,11 @@ fun AvatarSelectionScreen(
                                 color = peachColor,
                                 shape = RoundedCornerShape(12.dp)
                             )
-                            .clickable { selectedAvatar = emoji },
+                            .clickable { 
+                                selectedAvatar = emoji
+                                // MUTUAL EXCLUSION: Clear custom image
+                                customAvatarUri = null
+                            },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
