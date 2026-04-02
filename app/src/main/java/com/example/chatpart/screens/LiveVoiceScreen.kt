@@ -35,11 +35,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Call
 import androidx.compose.material.icons.rounded.CallEnd
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material.icons.rounded.VideocamOff
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.camera.core.CameraSelector
@@ -102,6 +105,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.example.chatpart.audio.LiveVoiceController
 import com.example.chatpart.api.MiniMaxAudioClient
 import com.example.chatpart.data.PersonChat
+import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.i18n.Languages
@@ -152,7 +156,9 @@ fun LiveVoiceScreen(
     onEndCall: () -> Unit,
     onMessageAdded: (userText: String, aiText: String) -> Unit,
     modifier: Modifier = Modifier,
-    currentLanguage: String = "en"
+    currentLanguage: String = "en",
+    allCharacters: List<Profile> = emptyList(),
+    voiceAssignmentPrefs: VoiceAssignmentPreferences? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -186,10 +192,14 @@ fun LiveVoiceScreen(
     // 对话模式
     var isFreeMode by remember { mutableStateOf(false) }
 
+    // Character picker state
+    var currentCharacter by remember { mutableStateOf(character) }
+    var showCharacterPicker by remember { mutableStateOf(false) }
+
     // Select character
-    val selectedCharacterImageUri = remember(character.customAvatarPath) {
-        android.util.Log.d("AvatarDebug", "customAvatarPath = ${character.customAvatarPath}")
-        character.customAvatarPath?.let { Uri.parse(it) }
+    val selectedCharacterImageUri = remember(currentCharacter.customAvatarPath) {
+        android.util.Log.d("AvatarDebug", "customAvatarPath = ${currentCharacter.customAvatarPath}")
+        currentCharacter.customAvatarPath?.let { Uri.parse(it) }
     }
     var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
 
@@ -199,7 +209,7 @@ fun LiveVoiceScreen(
     fun generateAiVideo(replyText: String) {
         scope.launch {
             try {
-                val result = videoManager.generateVideo(character, replyText)
+                val result = videoManager.generateVideo(currentCharacter, replyText)
                 val videoUrl = result.video_url
                 botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
             } catch (e: Exception) {
@@ -235,11 +245,11 @@ fun LiveVoiceScreen(
     }
 
     // 默认角色名称跟随语言设置
-    val displayName = when (character.id) {
-        "char_001" -> t("DEFAULT_ASSISTANT")
-        "char_002" -> t("DEFAULT_TEACHER")
-        "char_003" -> t("DEFAULT_CODER")
-        else -> character.name
+    val displayName = when (currentCharacter.id) {
+        "assistant" -> t("DEFAULT_ASSISTANT")
+        "teacher" -> t("DEFAULT_TEACHER")
+        "coding" -> t("DEFAULT_CODER")
+        else -> currentCharacter.name
     }
 
     // 派生状态
@@ -262,7 +272,7 @@ fun LiveVoiceScreen(
     // 创建 Controller
     val audioClient = remember { MiniMaxAudioClient(context) }
     val controller = remember {
-        LiveVoiceController(context, brain, audioClient, scope, currentLanguage)
+        LiveVoiceController(context, brain, audioClient, scope, currentLanguage, voiceAssignmentPrefs)
     }
 
     // 绑定 Controller 回调
@@ -298,7 +308,7 @@ fun LiveVoiceScreen(
                 context, Manifest.permission.RECORD_AUDIO
             ) == PackageManager.PERMISSION_GRANTED
             if (hasPermission) {
-                controller.startFreeMode(character) { chatHistory }
+                controller.startFreeMode(currentCharacter) { chatHistory }
             } else {
                 isFreeMode = false
             }
@@ -354,6 +364,57 @@ fun LiveVoiceScreen(
             onSettingsClick = { /* TODO: 打开设置 */ },
             modifier = Modifier.align(Alignment.TopCenter)
         )
+
+        // Character selector (only show when multiple characters available)
+        if (allCharacters.isNotEmpty()) {
+            Box(modifier = Modifier.align(Alignment.TopCenter)) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0x33FFFFFF),
+                    modifier = Modifier
+                        .padding(top = 68.dp)
+                        .clickable { showCharacterPicker = !showCharacterPicker }
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = currentCharacter.name,
+                            color = MoonlightWhite,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            Icons.Rounded.ExpandMore,
+                            contentDescription = null,
+                            tint = StardustGray,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = showCharacterPicker,
+                    onDismissRequest = { showCharacterPicker = false }
+                ) {
+                    allCharacters.forEach { char ->
+                        DropdownMenuItem(
+                            text = { Text(char.name) },
+                            onClick = {
+                                // Safe to just swap state: processWavFile receives
+                                // currentCharacter as a parameter on every call, so
+                                // the new character's voice assignment takes effect
+                                // immediately on the next voice exchange.
+                                currentCharacter = char
+                                showCharacterPicker = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
 
         // 3. 中央区域 — 无视频时显示能量球，有主画面内容时显示 BotVideoArea
         var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
@@ -522,7 +583,7 @@ fun LiveVoiceScreen(
                                 context, Manifest.permission.RECORD_AUDIO
                             ) == PackageManager.PERMISSION_GRANTED
                             if (hasPermission) {
-                                controller.startListening(character, chatHistory)
+                                controller.startListening(currentCharacter, chatHistory)
                             } else {
                                 isMicPressed = false
                                 permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)

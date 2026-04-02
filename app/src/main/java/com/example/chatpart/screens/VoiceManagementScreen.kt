@@ -30,10 +30,12 @@ import androidx.compose.ui.unit.sp
 import com.example.chatpart.Peach
 import com.example.chatpart.SoftWhite
 import com.example.chatpart.api.MiniMaxAudioClient
+import com.example.chatpart.data.CharacterInfo
 import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.data.DefaultVoice
 import com.example.chatpart.data.DefaultVoices
 import com.example.chatpart.data.SlotStatus
+import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.firestore.FirestoreError
 import com.example.chatpart.firestore.UserVoiceManager
@@ -49,7 +51,10 @@ fun VoiceManagementScreen(
     currentLanguage: String = "en",
     characterStorage: CharacterStorage,
     userVoiceManager: UserVoiceManager,
+    voiceAssignmentPrefs: VoiceAssignmentPreferences,
+    allCharacters: List<CharacterInfo>,
     onNavigateToVoiceClone: () -> Unit,
+    onNavigateToPurchase: () -> Unit,
     onBack: () -> Unit,
     onVoicesChanged: () -> Unit = {}
 ) {
@@ -92,6 +97,23 @@ fun VoiceManagementScreen(
 
     // Audio player
     var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    // Voice assignment state
+    var voiceAssignments by remember { mutableStateOf(voiceAssignmentPrefs.getAllAssignments()) }
+
+    fun refreshAssignments() {
+        voiceAssignments = voiceAssignmentPrefs.getAllAssignments()
+    }
+
+    // Helper: character names assigned to a given voiceId
+    fun assignedCharacterNames(voiceId: String): List<String> {
+        val assignedIds = voiceAssignments.filter { it.value == voiceId }.keys
+        return allCharacters.filter { it.id in assignedIds }.map { it.name }
+    }
+
+    // Assign dialog state
+    var assignDialogVoiceId by remember { mutableStateOf<String?>(null) }
+    var assignDialogDisplayName by remember { mutableStateOf("") }
 
     // MiniMax clients
     val audioClient = remember { MiniMaxAudioClient(context) }
@@ -222,6 +244,8 @@ fun VoiceManagementScreen(
                         // Update local storage after successful Firestore delete
                         val updatedProfile = profile.copy(voiceId = null)
                         characterStorage.updateCharacter(updatedProfile)
+                        voiceAssignmentPrefs.clearVoice(voiceId)
+                        refreshAssignments()
                         loadCharacters()
                         onVoicesChanged()
                     }
@@ -289,6 +313,8 @@ fun VoiceManagementScreen(
                         }
 
                     apiOnlyVoiceIds = apiOnlyVoiceIds.filter { it != voiceId }
+                    voiceAssignmentPrefs.clearVoice(voiceId)
+                    refreshAssignments()
                     onVoicesChanged()
                 }
                 .onFailure { e ->
@@ -492,7 +518,14 @@ fun VoiceManagementScreen(
                             t = translate,
                             subtitleColor = subtitleColor,
                             surfaceColor = surfaceColor,
-                            textColor = textColor
+                            textColor = textColor,
+                            assignDialogVoiceId = assignDialogVoiceId,
+                            assignDialogDisplayName = assignDialogDisplayName,
+                            onAssignClick = { voiceId, displayName ->
+                                assignDialogVoiceId = voiceId
+                                assignDialogDisplayName = displayName
+                            },
+                            assignedToNames = { voiceId -> assignedCharacterNames(voiceId) }
                         )
 
                         // Delete confirmation dialog for API-only voices
@@ -524,6 +557,11 @@ fun VoiceManagementScreen(
                             playingVoiceId = playingVoiceId,
                             isLoading = isLoading,
                             onPlayClick = { voice -> playDefaultVoice(voice) },
+                            onAssignClick = { voice ->
+                                assignDialogVoiceId = voice.id
+                                assignDialogDisplayName = voice.displayName
+                            },
+                            assignedToNames = { voiceId -> assignedCharacterNames(voiceId) },
                             t = translate,
                             subtitleColor = subtitleColor,
                             surfaceColor = surfaceColor,
@@ -537,33 +575,73 @@ fun VoiceManagementScreen(
 
             // Clone new voice button (only show in Cloned Voices tab)
             if (selectedTab == 0) {
-                Button(
-                    onClick = onNavigateToVoiceClone,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (slotStatus?.isFull == true) subtitleColor else Peach,
-                        contentColor = Color.White
-                    ),
-                    enabled = slotStatus?.isFull != true
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Add,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (slotStatus?.isFull == true) {
-                            "Slot Full - Delete a voice first"
-                        } else {
-                            translate("CLONE_FIRST_VOICE")
-                        },
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                if (slotStatus?.isFull == true) {
+                    // Slot is full — show disabled clone button + upgrade CTA
+                    Column {
+                        Button(
+                            onClick = {},
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(56.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = subtitleColor,
+                                contentColor = Color.White,
+                            ),
+                            enabled = false
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Slot Full",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onNavigateToPurchase,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Peach)
+                        ) {
+                            Text(
+                                text = "Get More Slots →",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onNavigateToVoiceClone,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Peach,
+                            contentColor = Color.White,
+                        ),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = translate("CLONE_FIRST_VOICE"),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
 
@@ -618,6 +696,29 @@ fun VoiceManagementScreen(
             }
         }
     }
+
+    // Assign voice dialog
+    if (assignDialogVoiceId != null) {
+        AssignVoiceDialog(
+            voiceDisplayName = assignDialogDisplayName,
+            voiceId = assignDialogVoiceId!!,
+            allCharacters = allCharacters,
+            currentAssignments = voiceAssignments,
+            onDismiss = { assignDialogVoiceId = null },
+            onSave = { selectedCharacterIds ->
+                val voiceId = assignDialogVoiceId!!
+                allCharacters.forEach { char ->
+                    if (char.id in selectedCharacterIds) {
+                        voiceAssignmentPrefs.setVoiceId(char.id, voiceId)
+                    } else if (voiceAssignments[char.id] == voiceId) {
+                        voiceAssignmentPrefs.setVoiceId(char.id, null)
+                    }
+                }
+                refreshAssignments()
+                assignDialogVoiceId = null
+            }
+        )
+    }
 }
 
 // Card for voices that exist on MiniMax API but aren't linked to a local character
@@ -629,6 +730,8 @@ private fun ApiOnlyVoiceItem(
     isLoading: Boolean,
     onPlayClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    onAssignClick: () -> Unit,
+    assignedToNames: List<String>,
     subtitleColor: Color,
     surfaceColor: Color,
     textColor: Color
@@ -637,7 +740,9 @@ private fun ApiOnlyVoiceItem(
         shape = RoundedCornerShape(16.dp),
         color = surfaceColor,
         shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onAssignClick() }
     ) {
         Row(
             modifier = Modifier
@@ -666,6 +771,23 @@ private fun ApiOnlyVoiceItem(
                     fontSize = 11.sp,
                     color = subtitleColor
                 )
+                if (assignedToNames.isNotEmpty()) {
+                    Text(
+                        text = "→ ${assignedToNames.joinToString(", ")}",
+                        fontSize = 11.sp,
+                        color = Peach,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = "Not assigned",
+                        fontSize = 11.sp,
+                        color = subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
             IconButton(onClick = onPlayClick, enabled = !isLoading) {
                 if (isLoading) {
@@ -701,6 +823,8 @@ private fun VoiceItem(
     isLoading: Boolean,
     onPlayClick: () -> Unit,
     onDeleteClick: () -> Unit,
+    onAssignClick: () -> Unit,
+    assignedToNames: List<String>,
     subtitleColor: Color,
     surfaceColor: Color,
     textColor: Color
@@ -709,7 +833,9 @@ private fun VoiceItem(
         shape = RoundedCornerShape(16.dp),
         color = surfaceColor,
         shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onAssignClick() }
     ) {
         Row(
             modifier = Modifier
@@ -742,6 +868,23 @@ private fun VoiceItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (assignedToNames.isNotEmpty()) {
+                    Text(
+                        text = "→ ${assignedToNames.joinToString(", ")}",
+                        fontSize = 11.sp,
+                        color = Peach,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = "Not assigned",
+                        fontSize = 11.sp,
+                        color = subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             // Play button
@@ -757,7 +900,7 @@ private fun VoiceItem(
                     )
                 } else {
                     Icon(
-                        imageVector = if (isPlaying) Icons.Rounded.PlayArrow else Icons.Rounded.PlayArrow,
+                        imageVector = Icons.Rounded.PlayArrow,
                         contentDescription = "Play",
                         tint = if (isPlaying) Peach else textColor
                     )
@@ -792,7 +935,11 @@ private fun ClonedVoicesTab(
     t: (String) -> String,
     subtitleColor: Color,
     surfaceColor: Color,
-    textColor: Color
+    textColor: Color,
+    assignDialogVoiceId: String?,
+    assignDialogDisplayName: String,
+    onAssignClick: (voiceId: String, displayName: String) -> Unit,
+    assignedToNames: (String) -> List<String>
 ) {
     val totalCount = charactersWithVoice.size + apiOnlyVoiceIds.size
 
@@ -845,6 +992,10 @@ private fun ClonedVoicesTab(
                     isLoading = isLoading && playingVoiceId == profile.voiceId,
                     onPlayClick = { profile.voiceId?.let { onPlayClick(it) } },
                     onDeleteClick = { onDeleteClick(profile) },
+                    onAssignClick = {
+                        profile.voiceId?.let { onAssignClick(it, profile.name) }
+                    },
+                    assignedToNames = profile.voiceId?.let { assignedToNames(it) } ?: emptyList(),
                     subtitleColor = subtitleColor,
                     surfaceColor = surfaceColor,
                     textColor = textColor
@@ -872,6 +1023,8 @@ private fun ClonedVoicesTab(
                         isLoading = isLoading && playingVoiceId == voiceId,
                         onPlayClick = { onPlayClick(voiceId) },
                         onDeleteClick = { onDeleteApiVoiceClick(voiceId) },
+                        onAssignClick = { onAssignClick(voiceId, voiceId) },
+                        assignedToNames = assignedToNames(voiceId),
                         subtitleColor = subtitleColor,
                         surfaceColor = surfaceColor,
                         textColor = textColor
@@ -910,6 +1063,8 @@ private fun DefaultVoicesTab(
     playingVoiceId: String?,
     isLoading: Boolean,
     onPlayClick: (DefaultVoice) -> Unit,
+    onAssignClick: (DefaultVoice) -> Unit,
+    assignedToNames: (String) -> List<String>,
     t: (String) -> String,
     subtitleColor: Color,
     surfaceColor: Color,
@@ -926,6 +1081,8 @@ private fun DefaultVoicesTab(
                 isPlaying = playingVoiceId == voice.id,
                 isLoading = isLoading && playingVoiceId == voice.id,
                 onPlayClick = { onPlayClick(voice) },
+                onAssignClick = { onAssignClick(voice) },
+                assignedToNames = assignedToNames(voice.id),
                 t = t,
                 subtitleColor = subtitleColor,
                 surfaceColor = surfaceColor,
@@ -942,6 +1099,8 @@ private fun DefaultVoiceItem(
     isPlaying: Boolean,
     isLoading: Boolean,
     onPlayClick: () -> Unit,
+    onAssignClick: () -> Unit,
+    assignedToNames: List<String>,
     t: (String) -> String,
     subtitleColor: Color,
     surfaceColor: Color,
@@ -953,7 +1112,9 @@ private fun DefaultVoiceItem(
         shape = RoundedCornerShape(16.dp),
         color = surfaceColor,
         shadowElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onAssignClick() }
     ) {
         Row(
             modifier = Modifier
@@ -993,6 +1154,23 @@ private fun DefaultVoiceItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                if (assignedToNames.isNotEmpty()) {
+                    Text(
+                        text = "→ ${assignedToNames.joinToString(", ")}",
+                        fontSize = 11.sp,
+                        color = Peach,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                } else {
+                    Text(
+                        text = "Not assigned",
+                        fontSize = 11.sp,
+                        color = subtitleColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             // Play button
@@ -1016,4 +1194,79 @@ private fun DefaultVoiceItem(
             }
         }
     }
+}
+
+@Composable
+private fun AssignVoiceDialog(
+    voiceDisplayName: String,
+    voiceId: String,
+    allCharacters: List<CharacterInfo>,
+    currentAssignments: Map<String, String>,
+    onDismiss: () -> Unit,
+    onSave: (selectedCharacterIds: Set<String>) -> Unit
+) {
+    var checkedIds by remember {
+        mutableStateOf(
+            allCharacters.filter { currentAssignments[it.id] == voiceId }
+                .map { it.id }
+                .toSet()
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Assign \"$voiceDisplayName\"")
+        },
+        text = {
+            Column {
+                allCharacters.forEach { character ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                checkedIds = if (character.id in checkedIds)
+                                    checkedIds - character.id
+                                else
+                                    checkedIds + character.id
+                            }
+                            .padding(vertical = 8.dp)
+                    ) {
+                        Checkbox(
+                            checked = character.id in checkedIds,
+                            onCheckedChange = { checked ->
+                                checkedIds = if (checked)
+                                    checkedIds + character.id
+                                else
+                                    checkedIds - character.id
+                            }
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(character.emoji, fontSize = 20.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(character.name, fontSize = 15.sp)
+                            val currentVoice = currentAssignments[character.id]
+                            if (currentVoice != null && currentVoice != voiceId) {
+                                Text(
+                                    "currently: other voice",
+                                    fontSize = 11.sp,
+                                    color = Color.Gray
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onSave(checkedIds) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }

@@ -151,7 +151,8 @@ fun ChatScreen(
     isDarkMode: Boolean = false,
     customCharacters: List<Profile> = emptyList(),
     targetBotId: String? = null,
-    currentLanguage: String = "en"
+    currentLanguage: String = "en",
+    voiceAssignmentPrefs: com.example.chatpart.data.VoiceAssignmentPreferences? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -438,7 +439,10 @@ fun ChatScreen(
                                 }
                                 val filePath = audioClient.textToVoice(
                                     text = text,
-                                    voiceId = selectedBot.voiceId ?: resolveProfile()?.voiceId ?: "",
+                                    voiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.id)
+                                        ?: selectedBot.voiceId
+                                        ?: resolveProfile()?.voiceId
+                                        ?: "English_Graceful_Lady",
                                     emotion = "calm",
                                     languageBoost = boost
                                 )

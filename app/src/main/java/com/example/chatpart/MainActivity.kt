@@ -64,9 +64,12 @@ import com.example.chatpart.screens.CharacterDetailScreen
 import com.example.chatpart.screens.LanguageSelectionScreen
 import com.example.chatpart.screens.VoiceCloneScreen
 import com.example.chatpart.screens.VoiceManagementScreen
+import com.example.chatpart.screens.SlotPurchaseScreen
 import com.example.chatpart.screens.LiveVoiceScreen
 import com.example.chatpart.screens.CreateCharacterScreen
+import com.example.chatpart.data.CharacterInfo
 import com.example.chatpart.data.CharacterStorage
+import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.ui.theme.ChatPartTheme
@@ -75,6 +78,8 @@ import com.example.chatpart.ui.theme.Peach
 import com.google.firebase.Firebase
 import com.google.firebase.analytics.FirebaseAnalytics
 import com.google.firebase.analytics.analytics
+import com.example.chatpart.data.SlotStatus
+import com.stripe.android.PaymentConfiguration
 import com.google.firebase.analytics.logEvent
 import com.google.firebase.auth.FirebaseUser
 
@@ -112,7 +117,7 @@ class MainActivity : ComponentActivity() {
 
     // Default profile for chat (fallback only)
     private val defaultProfile = Profile(
-        id = "char_001",
+        id = "assistant",
         name = "AI 助手",
         gender = "女",
         relationship = "用户的朋友",
@@ -143,6 +148,7 @@ class MainActivity : ComponentActivity() {
         const val PAGE_VOICE_MANAGEMENT = 12
         const val PAGE_LIVE_VOICE = 13
         const val PAGE_CREATE_CHARACTER = 14  // New unified Create Character Wizard
+        const val PAGE_SLOT_PURCHASE = 15
 
         // Onboarding pages set (for filtering in goBack)
         val ONBOARDING_PAGES = setOf(
@@ -156,6 +162,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
 
         super.onCreate(savedInstanceState)
+
+        // Initialize Stripe
+        PaymentConfiguration.init(
+            applicationContext,
+            BuildConfig.STRIPE_PUBLISHABLE_KEY
+        )
 
         // Initialize Firebase Analytics
         firebaseAnalytics = Firebase.analytics
@@ -269,10 +281,34 @@ class MainActivity : ComponentActivity() {
             val characterStorage = remember(currentUser?.uid) {
                 CharacterStorage(context, currentUser?.uid ?: "")
             }
+            // Voice assignment preferences — maps characterId → voiceId
+            val voiceAssignmentPrefs = remember(currentUser?.uid) {
+                VoiceAssignmentPreferences(context, currentUser?.uid ?: "")
+            }
             // Reload characters whenever the storage switches to a different user
             var characters by remember(currentUser?.uid) {
                 mutableStateOf(characterStorage.loadCharacters())
             }
+
+            // All character infos for VoiceManagementScreen (default bots + custom characters)
+            val defaultChatbotInfos = listOf(
+                CharacterInfo("assistant", "Assistant", "🤖", isDefault = true),
+                CharacterInfo("teacher",   "Teacher",   "👩‍🏫", isDefault = true),
+                CharacterInfo("coding",    "Coder",    "💻", isDefault = true)
+            )
+            val allCharacterInfos = remember(characters) {
+                defaultChatbotInfos + characters.map { profile ->
+                    CharacterInfo(profile.id, profile.name, "👤", isDefault = false)
+                }
+            }
+
+            // All profiles for LiveVoiceScreen (synthetic profiles for default bots)
+            val defaultBotProfiles = listOf(
+                Profile(id = "assistant", name = "Assistant", gender = "其他", background = "You are a helpful AI assistant.", relationship = "assistant"),
+                Profile(id = "teacher",   name = "Teacher",   gender = "其他", background = "You are a knowledgeable teacher.", relationship = "teacher"),
+                Profile(id = "coding",    name = "Coder",     gender = "其他", background = "You are an expert software engineer.", relationship = "coding assistant")
+            )
+            val allProfiles = remember(characters) { defaultBotProfiles + characters }
             var selectedCharacter by remember(currentUser?.uid) {
                 mutableStateOf(characterStorage.getSelectedCharacter() ?: defaultProfile)
             }
@@ -280,6 +316,9 @@ class MainActivity : ComponentActivity() {
 
             // UserVoiceManager for Firestore operations (created when user signs in)
             var userVoiceManager by remember { mutableStateOf<UserVoiceManager?>(null) }
+
+            // Slot status — collected from UserVoiceManager, passed to SlotPurchaseScreen
+            var slotStatus by remember { mutableStateOf<SlotStatus?>(null) }
 
             // Initialize UserVoiceManager when user signs in.
             // Also clear it on sign-out so old uid is never reused.
@@ -289,6 +328,16 @@ class MainActivity : ComponentActivity() {
                     userVoiceManager?.ensureUserExists(currentUser!!.email ?: "")
                 } else {
                     userVoiceManager = null
+                    slotStatus = null
+                }
+            }
+
+            // Observe slot status from Firestore in real-time
+            val coroutineScope = rememberCoroutineScope()
+            LaunchedEffect(userVoiceManager) {
+                userVoiceManager?.observeSlotStatus()?.collect { result ->
+                    result.onSuccess { slotStatus = it }
+                    result.onFailure { slotStatus = null }
                 }
             }
 
@@ -405,7 +454,9 @@ class MainActivity : ComponentActivity() {
                                     goBack(PAGE_CHARACTER_LIST)
                                 },
                                 onMessageAdded = { _, _ -> },
-                                currentLanguage = currentLanguage
+                                currentLanguage = currentLanguage,
+                                allCharacters = allProfiles,
+                                voiceAssignmentPrefs = voiceAssignmentPrefs
                             )
                         } ?: run {
                             LaunchedEffect(Unit) { goBack() }
@@ -632,6 +683,8 @@ class MainActivity : ComponentActivity() {
                             currentLanguage = currentLanguage,
                             characterStorage = characterStorage,
                             userVoiceManager = manager,
+                            voiceAssignmentPrefs = voiceAssignmentPrefs,
+                            allCharacters = allCharacterInfos,
                             onNavigateToVoiceClone = {
                                 pendingVoiceCloneProfile = Profile(
                                     id = "temp_voice_${System.currentTimeMillis()}",
@@ -643,6 +696,9 @@ class MainActivity : ComponentActivity() {
                                 voiceCloneFromOnboarding = false
                                 navigateTo(PAGE_VOICE_CLONE)
                             },
+                            onNavigateToPurchase = {
+                                navigateTo(PAGE_SLOT_PURCHASE)
+                            },
                             onBack = {
                                 goBack()
                             },
@@ -651,6 +707,17 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         }
+                    }
+                    PAGE_SLOT_PURCHASE -> {
+                        SlotPurchaseScreen(
+                            isDarkMode = isDarkMode,
+                            currentSlotStatus = slotStatus,
+                            onBack = { goBack() },
+                            onPurchaseSuccess = {
+                                // Firestore Flow (observeSlotStatus) updates automatically
+                                goBack()
+                            }
+                        )
                     }
                     else -> {
                         // Main page with tab navigation
@@ -683,7 +750,8 @@ class MainActivity : ComponentActivity() {
                             mainSelectedTab = mainSelectedTab,
                             onSelectedTabChange = { mainSelectedTab = it },
                             chatTargetBotId = chatTargetBotId,
-                            onChatTargetBotIdChange = { chatTargetBotId = it }
+                            onChatTargetBotIdChange = { chatTargetBotId = it },
+                            voiceAssignmentPrefs = voiceAssignmentPrefs
                         )
                     }
                 }
@@ -710,7 +778,8 @@ fun MainTabScreen(
     mainSelectedTab: Int = 0,
     onSelectedTabChange: (Int) -> Unit = {},
     chatTargetBotId: String? = null,
-    onChatTargetBotIdChange: (String?) -> Unit = {}
+    onChatTargetBotIdChange: (String?) -> Unit = {},
+    voiceAssignmentPrefs: VoiceAssignmentPreferences? = null
 ) {
     val context = LocalContext.current
 
@@ -796,7 +865,8 @@ fun MainTabScreen(
                     isDarkMode = isDarkMode,
                     customCharacters = customCharacters,
                     targetBotId = chatTargetBotId,
-                    currentLanguage = currentLanguage
+                    currentLanguage = currentLanguage,
+                    voiceAssignmentPrefs = voiceAssignmentPrefs
                 )
                 1 -> HistoryScreen(
                     isDarkMode = isDarkMode,

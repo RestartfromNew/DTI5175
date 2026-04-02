@@ -92,4 +92,12 @@ service cloud.firestore {
         && voiceId.matches('^[a-z][a-z0-9]*(_[a-z0-9]+)*$');  // 格式: 小写字母/数字，可含下划线
     }
   }
+
+    // ============================================
+    // processed_payments: idempotency records written by Cloud Functions.
+    // No client access.
+    // ============================================
+    match /processed_payments/{paymentIntentId} {
+      allow read, write: if false;
+    }
 }

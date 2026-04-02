@@ -56,3 +56,16 @@ Thumbs.db
 docs/
 .cowork-temp
 .pipi-shrimp/
+
+# Node dependencies
+node_modules/
+functions/node_modules/
+functions/lib/
+AGENTS.md
+MEMORY.md
+SOUL.md
+TOOLS.md
+USER.md
+IDENTITY.md
+HEARTBEAT.md
+.openclaw/workspace-state.json

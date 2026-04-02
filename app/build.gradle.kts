@@ -10,6 +10,7 @@ val minimaxGroupId = localProps.getProperty("MINIMAX_GROUP_ID") ?: ""
 val minimaxBaseUrl = localProps.getProperty("MINIMAX_BASE_URL") ?: ""
 val assemblyAiApiKey = localProps.getProperty("ASSEMBLYAI_API_KEY") ?: ""
 val deepgramApiKey = localProps.getProperty("DEEPGRAM_API_KEY") ?: ""
+val stripePublishableKey = localProps.getProperty("STRIPE_PUBLISHABLE_KEY") ?: ""
 
 plugins {
     alias(libs.plugins.android.application)
@@ -40,6 +41,7 @@ android {
         buildConfigField("String", "MINIMAX_BASE_URL", "\"$minimaxBaseUrl\"")
         buildConfigField("String", "ASSEMBLYAI_API_KEY", "\"$assemblyAiApiKey\"")
         buildConfigField("String", "DEEPGRAM_API_KEY", "\"$deepgramApiKey\"")
+        buildConfigField("String", "STRIPE_PUBLISHABLE_KEY", "\"$stripePublishableKey\"")
     }
 
     buildTypes {
@@ -81,6 +83,7 @@ dependencies {
     implementation(libs.firebase.analytics)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.auth)
+    implementation(libs.firebase.functions)
 
     // Kotlin Coroutines for Firebase
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
@@ -123,6 +126,9 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // Stripe
+    implementation("com.stripe:stripe-android:21.+")
 
     // MiniMax API - OkHttp & Gson
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

@@ -11,6 +11,7 @@ import androidx.annotation.RequiresPermission
 import com.example.chatpart.api.DeepgramAsrClient
 import com.example.chatpart.api.MiniMaxAudioClient
 import com.example.chatpart.data.PersonChat
+import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Profile
 import com.example.chatpart.i18n.Languages
@@ -42,7 +43,8 @@ class LiveVoiceController(
     private val brain: PersonChat,
     private val audioClient: MiniMaxAudioClient,
     private val scope: CoroutineScope,
-    private val currentLanguage: String = "en"
+    private val currentLanguage: String = "en",
+    private val voiceAssignmentPrefs: VoiceAssignmentPreferences? = null
 ) {
     private fun t(key: String) = Languages.getString(currentLanguage, key)
 
@@ -295,10 +297,14 @@ class LiveVoiceController(
                 onFinalAiReply?.invoke(aiText)
             }
 
+            val resolvedVoiceId = voiceAssignmentPrefs?.getVoiceId(profile.id)
+                ?: profile.voiceId
+                ?: "English_Graceful_Lady"
+
             val voicePath = withContext(Dispatchers.IO) {
                 audioClient.textToVoice(
                     text = aiText,
-                    voiceId = profile.voiceId ?: "",
+                    voiceId = resolvedVoiceId,
                     emotion = "",
                     languageBoost = ""
                 )
