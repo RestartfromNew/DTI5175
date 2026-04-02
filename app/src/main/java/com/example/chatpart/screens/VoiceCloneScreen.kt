@@ -94,6 +94,9 @@ fun VoiceCloneScreen(
     var cloneSuccess by remember { mutableStateOf(false) }
     var cloneError by remember { mutableStateOf<String?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
+    var referenceTranscript by remember { mutableStateOf("") }
+    val minimaxManager = remember { MiniMaxVoiceCloneManager(context) }
+    val voiceCloneManager = remember { VoiceCloneManager(context) }
 
     // Network status
     var isOffline by remember { mutableStateOf(false) }
@@ -411,7 +414,18 @@ fun VoiceCloneScreen(
                                     triggerHapticFeedback() // Vibration feedback
                                     if (isRecording) {
                                         isRecording = false
-                                        recordedFile = audioManager.stopRecording()
+                                        val file = audioManager.stopRecording()
+                                        recordedFile = file
+
+                                        if (file != null) {
+                                            scope.launch {
+                                                //val transcript = voiceCloneManager.tryGenerateTranscript(file)
+
+                                                //referenceTranscript = transcript
+                                                //Log.d("VoiceDebug", "referenceTranscript = $referenceTranscript")
+                                                Log.d("VoiceDebug", "recorded file = ${file.absolutePath}")
+                                            }
+                                        }
                                     }
                                 }
                             )
@@ -505,6 +519,28 @@ fun VoiceCloneScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = referenceTranscript,
+                onValueChange = { referenceTranscript = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Reference transcript") },
+                placeholder = { Text("Enter the exact words spoken in the reference audio") },
+                minLines = 3,
+                shape = RoundedCornerShape(12.dp),
+                enabled = !isCloning,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = peachColor,
+                    unfocusedBorderColor = hintColor.copy(alpha = 0.4f),
+                    focusedTextColor = textColor,
+                    unfocusedTextColor = textColor,
+                    focusedContainerColor = surfaceColor,
+                    unfocusedContainerColor = surfaceColor
+                )
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
             // Buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -548,30 +584,38 @@ fun VoiceCloneScreen(
                             cloneError = "Recording too short. Please record at least 10 seconds."
                             return@Button
                         }
+                        if (referenceTranscript.isBlank()) {
+                            cloneError = "Please enter the transcript of the reference audio."
+                            return@Button
+                        }
                         // Start cloning
                         isCloning = true
                         cloneError = null
                         // Launch cloning in background
-                        val minimaxManager = MiniMaxVoiceCloneManager(context)
-                        val voiceCloneManager = VoiceCloneManager(context)
+
                         scope.launch {
                             if (recordedFile != null) {
-                                // SECURITY: Pass uid for account isolation in voice_id
-                                val result = minimaxManager.cloneVoice(recordedFile!!, characterId, uid)
-                                result.onSuccess { voiceId ->
-                                    scope.launch {
-                                        try {
-                                            val uploadResult = voiceCloneManager.uploadReferenceAssets(
-                                                audioFile = recordedFile!!,
-                                                characterId = characterId,
-                                                avatarPath = avatarPath
-                                            )
-                                            Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
-                                        } catch (e: Exception) {
-                                            Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
-                                        }
+                                val result = minimaxManager.cloneVoice(
+                                    audioFile = recordedFile!!,
+                                    characterId = characterId,
+                                    uid = uid
+                                )
+
+                                if (result.isSuccess) {
+                                    val voiceId = result.getOrThrow()
+
+                                    try {
+                                        val uploadResult = voiceCloneManager.uploadReferenceAssets(
+                                            audioFile = recordedFile!!,
+                                            characterId = characterId,
+                                            avatarPath = avatarPath,
+                                            transcript = referenceTranscript
+                                        )
+                                        Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
+                                    } catch (e: Exception) {
+                                        Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
                                     }
-                                    // Prepare voice data for Firestore
+
                                     val voice = ClonedVoice(
                                         id = UUID.randomUUID().toString(),
                                         voiceId = voiceId,
@@ -579,7 +623,6 @@ fun VoiceCloneScreen(
                                         characterName = characterName
                                     )
 
-                                    // Save to Firestore with retry
                                     userVoiceManager.addClonedVoice(voice)
                                         .onSuccess {
                                             cloneSuccess = true
@@ -592,24 +635,20 @@ fun VoiceCloneScreen(
                                             Log.e("VoiceClone", "Firestore save failed: ${firestoreError.message}")
                                             isCloning = false
 
-                                            // COMPENSATION (P4): MiniMax clone succeeded but Firestore failed
-                                            // Delete the voice from MiniMax to prevent orphaned voices
                                             Log.w("VoiceClone", "Rolling back MiniMax voice due to Firestore failure: $voiceId")
                                             minimaxManager.deleteVoice(voiceId)
 
-                                            // Show error with retry option
                                             val errorMsg = userVoiceManager.getUserFriendlyErrorMessage(firestoreError)
                                             cloneError = "$errorMsg (Voice cloned but not saved)"
 
-                                            // Show Snackbar with retry
                                             val snackbarResult = snackbarHostState.showSnackbar(
                                                 message = "Failed to save voice: $errorMsg",
                                                 actionLabel = "Retry",
                                                 duration = SnackbarDuration.Long
                                             )
+
                                             when (snackbarResult) {
                                                 SnackbarResult.ActionPerformed -> {
-                                                    // Retry saving to Firestore
                                                     isCloning = true
                                                     userVoiceManager.addClonedVoice(voice)
                                                         .onSuccess {
@@ -624,21 +663,19 @@ fun VoiceCloneScreen(
                                                             cloneSuccess = false
                                                             cloneError = "Failed to save: ${userVoiceManager.getUserFriendlyErrorMessage(retryError)}"
                                                             Log.e("VoiceClone", "Retry failed: ${retryError.message}")
-                                                            // Don't proceed if retry also fails
                                                         }
                                                 }
                                                 SnackbarResult.Dismissed -> {
-                                                    // User dismissed - DON'T proceed with voice cloning
-                                                    // Only proceed if Firestore save succeeded
                                                     cloneSuccess = false
                                                     cloneError = "Voice cloned but not saved to cloud"
                                                 }
                                             }
                                         }
-                                }.onFailure { error ->
+                                } else {
+                                    val error = result.exceptionOrNull()
                                     isCloning = false
-                                    Log.e("VoiceClone", "Clone failed: ${error.message}")
-                                    val msg = error.message ?: "Unknown error"
+                                    Log.e("VoiceClone", "Clone failed: ${error?.message}", error)
+                                    val msg = error?.message ?: "Unknown error"
                                     cloneError = when {
                                         msg.contains("2013") || msg.contains("sensitive") ->
                                             "Audio rejected: Please record in Chinese or English only"

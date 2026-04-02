@@ -209,8 +209,10 @@ fun LiveVoiceScreen(
     fun generateAiVideo(replyText: String) {
         scope.launch {
             try {
+                android.util.Log.d("AvatarDebug", "generateAiVideo called, replyText = $replyText")
                 val result = videoManager.generateVideo(currentCharacter, replyText)
                 val videoUrl = result.video_url
+                android.util.Log.d("AvatarDebug", "videoUrl = $videoUrl")
                 botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
             } catch (e: Exception) {
                 android.util.Log.e("AvatarDebug", "generateAiVideo failed: ${e.message}", e)
@@ -417,7 +419,7 @@ fun LiveVoiceScreen(
         }
 
         // 3. 中央区域 — 无视频时显示能量球，有主画面内容时显示 BotVideoArea
-        var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
+        // var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
 
         when (botVideoSource) {
             is BotVideoSource.None -> {
@@ -438,7 +440,10 @@ fun LiveVoiceScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp)
                         .height(360.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(20.dp)),
+                    onRemoteVideoFinished = {
+                        botVideoSource = BotVideoSource.AvatarImage
+                    }
                 )
             }
         }
@@ -1300,7 +1305,8 @@ fun CameraPreviewView(modifier: Modifier = Modifier) {
 fun BotVideoArea(
     source: BotVideoSource,
     characterImageUri: Uri?,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onRemoteVideoFinished: () -> Unit = {}
 ) {
     when (source) {
         is BotVideoSource.None -> {}
@@ -1325,26 +1331,43 @@ fun BotVideoArea(
         is BotVideoSource.RemoteVideo -> {
             RemoteVideoView(
                 videoUrl = source.url,
-                modifier = modifier
+                modifier = modifier,
+                onFinished = onRemoteVideoFinished
             )
         }
     }
 }
 
 @Composable
-fun RemoteVideoView(videoUrl: String, modifier: Modifier = Modifier) {
+fun RemoteVideoView(
+    videoUrl: String,
+    modifier: Modifier = Modifier,
+    onFinished: () -> Unit
+) {
     val context = LocalContext.current
     val exoPlayer = remember(videoUrl) {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUrl))
-            repeatMode = Player.REPEAT_MODE_ONE
+            repeatMode = Player.REPEAT_MODE_OFF
             playWhenReady = true
             prepare()
         }
     }
 
     DisposableEffect(exoPlayer) {
-        onDispose { exoPlayer.release() }
+        val listener = object : Player.Listener {
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                if (playbackState == Player.STATE_ENDED) {
+                    onFinished()
+                }
+            }
+        }
+        exoPlayer.addListener(listener)
+
+        onDispose {
+            exoPlayer.removeListener(listener)
+            exoPlayer.release()
+        }
     }
 
     AndroidView(

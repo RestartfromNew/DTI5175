@@ -33,12 +33,12 @@ class VoiceCloneManager(
                 "Audio file is missing"
             }
 
-            Log.d("VoiceDebug", "before speechToText")
-            val transcript = audioClient.speechToText(audioFile)
-            Log.d("VoiceDebug", "after speechToText, transcript = $transcript")
-
-            if (transcript.isBlank()) {
-                throw IllegalStateException("Failed to generate transcript")
+            if (!avatarPath.isNullOrBlank()) {
+                Log.d("VoiceDebug", "before uploadAvatar")
+                val avatarResp = videoManager.uploadAvatar(avatarPath, characterId)
+                Log.d("VoiceDebug", "after uploadAvatar, server path = $avatarResp")
+            } else {
+                Log.d("VoiceDebug", "skip uploadAvatar because avatarPath is blank")
             }
 
             Log.d("VoiceDebug", "before MiniMax clone")
@@ -47,12 +47,12 @@ class VoiceCloneManager(
                 .getOrThrow()
             Log.d("VoiceDebug", "after MiniMax clone, voiceId = $voiceId")
 
-            if (!avatarPath.isNullOrBlank()) {
-                Log.d("VoiceDebug", "before uploadAvatar")
-                val avatarResp = videoManager.uploadAvatar(avatarPath, characterId)
-                Log.d("VoiceDebug", "after uploadAvatar, server path = $avatarResp")
-            } else {
-                Log.d("VoiceDebug", "skip uploadAvatar because avatarPath is blank")
+            Log.d("VoiceDebug", "before speechToText")
+            val transcript = audioClient.speechToText(audioFile)
+            Log.d("VoiceDebug", "after speechToText, transcript = $transcript")
+
+            if (transcript.isBlank()) {
+                throw IllegalStateException("Failed to generate transcript")
             }
 
             Log.d("VoiceDebug", "before uploadVoiceReference")
@@ -76,7 +76,8 @@ class VoiceCloneManager(
     suspend fun uploadReferenceAssets(
         audioFile: File?,
         characterId: String,
-        avatarPath: String?
+        avatarPath: String?,
+        transcript: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             Log.d("VoiceDebug", "uploadReferenceAssets entered")
@@ -88,21 +89,26 @@ class VoiceCloneManager(
                 "Audio file is missing"
             }
 
-            val transcript = audioClient.speechToText(audioFile)
-            Log.d("VoiceDebug", "transcript = $transcript")
-
-            if (transcript.isBlank()) {
-                throw IllegalStateException("Failed to generate transcript")
-            }
-
             if (!avatarPath.isNullOrBlank()) {
+                Log.d("VoiceDebug", "before uploadAvatar")
                 val avatarResp = videoManager.uploadAvatar(
                     localAvatarPath = avatarPath,
                     characterId = characterId
                 )
-                Log.d("VoiceDebug", "avatar uploaded = $avatarResp")
+                Log.d("VoiceDebug", "after uploadAvatar, server path = $avatarResp")
+            } else {
+                Log.d("VoiceDebug", "skip uploadAvatar because avatarPath is blank")
             }
 
+            Log.d("VoiceDebug", "before speechToText")
+
+            Log.d("VoiceDebug", "after speechToText, transcript = $transcript")
+
+            if (transcript.isBlank()) {
+                throw IllegalStateException("Transcript is empty")
+            }
+
+            Log.d("VoiceDebug", "before uploadVoiceReference")
             val voiceResp = videoManager.uploadVoiceReference(
                 localVoicePath = audioFile.absolutePath,
                 characterId = characterId,
@@ -110,7 +116,7 @@ class VoiceCloneManager(
             )
             Log.d(
                 "VoiceDebug",
-                "voice uploaded = ${voiceResp.character_voice}, txt = ${voiceResp.character_txt}"
+                "after uploadVoiceReference, voice = ${voiceResp.character_voice}, txt = ${voiceResp.character_txt}"
             )
 
             Result.success(Unit)

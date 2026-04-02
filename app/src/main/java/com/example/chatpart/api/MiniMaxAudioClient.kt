@@ -328,6 +328,9 @@ class MiniMaxAudioClient(private val context: Context) : AudioClient {
      */
     suspend fun speechToText(wavFile: File): String = withContext(Dispatchers.IO) {
         try {
+            Log.d(TAG, "speechToText file = ${wavFile.absolutePath}")
+            Log.d(TAG, "speechToText exists = ${wavFile.exists()}")
+            Log.d(TAG, "speechToText size = ${wavFile.length()}")
             // ── Step 1: 创建 STT 任务 ─────────────────────────────────────
             val multipartBody = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
@@ -348,10 +351,15 @@ class MiniMaxAudioClient(private val context: Context) : AudioClient {
                 .post(multipartBody)
                 .build()
 
-            val createBody = client.newCall(createRequest).execute().use { resp ->
+            //val createBody = client.newCall(createRequest).execute().use { resp ->
+            //    resp.body?.string() ?: return@withContext ""
+            //}
+            //Log.d(TAG, "STT create response: $createBody")
+            val createResponse = client.newCall(createRequest).execute()
+            val createBody = createResponse.use { resp ->
+                Log.d(TAG, "STT create http code = ${resp.code}")
                 resp.body?.string() ?: return@withContext ""
             }
-            Log.d(TAG, "STT create response: $createBody")
 
             val createResp = gson.fromJson(createBody, MiniMaxSttCreateResponse::class.java)
             if (createResp.base_resp?.status_code != 0) {
@@ -359,16 +367,30 @@ class MiniMaxAudioClient(private val context: Context) : AudioClient {
                 return@withContext ""
             }
 
+
             val jobId = createResp.generation_id ?: return@withContext ""
             Log.d(TAG, "STT job created: $jobId")
 
             // ── Step 2: 轮询结果（每 500ms 一次，最多 30 次 = 15 秒）──────
-            val pollUrlBase = "${MiniMaxConfig.BASE_URL}/v1/stt/$jobId"
-            for (attempt in 0 until 30) {
+            //val pollUrlBase = "${MiniMaxConfig.BASE_URL}/v1/stt/$jobId"
+            val pollUrlBuilder = StringBuilder("${MiniMaxConfig.BASE_URL}/v1/stt/$jobId")
+            if (BuildConfig.MINIMAX_GROUP_ID.isNotBlank()) {
+                pollUrlBuilder.append("?GroupId=${BuildConfig.MINIMAX_GROUP_ID}")
+            }
+            val pollUrlBase = pollUrlBuilder.toString()
+            val pollResponse = client.newCall(
+                Request.Builder().url(pollUrlBase).get().build()
+            ).execute()
+
+            for (attempt in 0 until 60) {
                 delay(500)
-                val pollBody = client.newCall(
-                    Request.Builder().url(pollUrlBase).get().build()
-                ).execute().use { resp ->
+                //val pollBody = client.newCall(
+                //    Request.Builder().url(pollUrlBase).get().build()
+                //).execute().use { resp ->
+                //    resp.body?.string() ?: ""
+                //}
+                val pollBody = pollResponse.use { resp ->
+                    Log.d(TAG, "STT poll #$attempt http code = ${resp.code}")
                     resp.body?.string() ?: ""
                 }
                 if (pollBody.isEmpty()) continue
@@ -390,7 +412,7 @@ class MiniMaxAudioClient(private val context: Context) : AudioClient {
                 }
             }
 
-            Log.e(TAG, "STT timed out after 15s")
+            Log.e(TAG, "STT timed out after 30s")
             ""
         } catch (e: Exception) {
             Log.e(TAG, "speechToText error: ${e.message}")
