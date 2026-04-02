@@ -103,45 +103,30 @@ fun VoiceManagementScreen(
         charactersWithVoice = characterStorage.loadCharacters().filter { it.voiceId != null }
     }
 
-    // Fetch all cloned voices from MiniMax API and find any not in local storage
-    // SECURITY (P1, P5): Filter by user ownership to prevent seeing/deleting other users' voices
+    // Sync voices from MiniMax API + Firestore, show any not already in local storage.
+    // Uses both sources so data appears even when one is unavailable.
     fun syncFromApi() {
         scope.launch {
             isSyncing = true
             syncError = null
+
+            val localVoiceIds = characterStorage.loadCharacters()
+                .mapNotNull { it.voiceId }.toSet()
+            val combined = mutableSetOf<String>()
+
+            // MiniMax API (optional — offline-tolerant)
             voiceCloneManager.fetchClonedVoices()
-                .onSuccess { apiVoiceIds ->
-                    val localVoiceIds = characterStorage.loadCharacters()
-                        .mapNotNull { it.voiceId }.toSet()
+                .onSuccess { ids -> combined.addAll(ids) }
+                .onFailure { e -> Log.w("VoiceManagement", "MiniMax sync failed: ${e.message}") }
 
-                    // SECURITY (P5): Only show API-only voices that belong to the current user
-                    // Filter by uid prefix in voice_id format: cp{uid_prefix}_{...}
-                    val currentUid = userVoiceManager.uid
-                    val userOwnedVoiceIds = apiVoiceIds.filter { voiceId ->
-                        voiceCloneManager.isVoiceOwnedByUser(voiceId, currentUid)
-                    }
-
-                    // Only keep IDs that aren't already linked to a local character
-                    apiOnlyVoiceIds = userOwnedVoiceIds.filter { it !in localVoiceIds }
-
-                    // Log warning if there are other users' voices on this device
-                    val otherUsersVoices = apiVoiceIds.filter { !voiceCloneManager.isVoiceOwnedByUser(it, currentUid) }
-                    if (otherUsersVoices.isNotEmpty()) {
-                        Log.w("VoiceManagement", "Found ${otherUsersVoices.size} voices from other users (will not display)")
-                    }
-
-                    syncError = null
+            // Firestore voices (already scoped to this user's uid document)
+            userVoiceManager.getClonedVoices()
+                .onSuccess { voices ->
+                    voices.map { it.voiceId }.filter { it.isNotEmpty() }.forEach { combined.add(it) }
                 }
-                .onFailure { e ->
-                    Log.w("VoiceManagement", "API sync failed (offline?): ${e.message}")
-                    syncError = "Failed to sync from server"
-                    // Show snackbar with retry
-                    snackbarHostState.showSnackbar(
-                        message = "Sync failed: ${e.message ?: "Network error"}",
-                        actionLabel = "Retry",
-                        duration = SnackbarDuration.Long
-                    )
-                }
+                .onFailure { e -> Log.w("VoiceManagement", "Firestore voice sync failed: ${e.message}") }
+
+            apiOnlyVoiceIds = combined.filter { it !in localVoiceIds }
             isSyncing = false
         }
     }

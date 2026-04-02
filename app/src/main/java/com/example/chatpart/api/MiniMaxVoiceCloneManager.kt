@@ -245,7 +245,7 @@ class MiniMaxVoiceCloneManager(private val context: Context) {
      */
     fun isVoiceOwnedByUser(voiceId: String, uid: String): Boolean {
         val prefix = extractUidPrefix(voiceId) ?: return false
-        return uid.startsWith(prefix) || prefix == uid.take(8)
+        return prefix == uid.take(8).lowercase()
     }
 
     /**

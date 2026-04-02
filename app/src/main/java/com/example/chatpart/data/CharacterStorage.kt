@@ -45,7 +45,7 @@ class CharacterStorage(private val context: Context, uid: String = "") {
 
     fun loadCharacters(): List<Profile> {
         val json = prefs.getString(KEY_CHARACTERS, "") ?: ""
-        if (json.isEmpty()) return getDefaultCharacters()
+        if (json.isEmpty()) return emptyList()
 
         return json.split("|||").mapNotNull { profileStr ->
             try {
@@ -84,23 +84,6 @@ class CharacterStorage(private val context: Context, uid: String = "") {
         val selectedId = getSelectedCharacterId()
         val characters = loadCharacters()
         return characters.find { it.id == selectedId } ?: characters.firstOrNull()
-    }
-
-    private fun getDefaultCharacters(): List<Profile> {
-        val defaultProfile = Profile(
-            id = "char_001",
-            name = "AI 助手",
-            gender = "女",
-            relationship = "用户的朋友",
-            background = "你是一个友好、乐观的女孩，喜欢帮助用户",
-            personality = "善良活泼",
-            speakStyle = listOf("友好", "活泼"),
-            doRules = listOf("保持朋友身份"),
-            dontRules = listOf("不要承认是AI")
-        )
-        saveCharacters(listOf(defaultProfile))
-        saveSelectedCharacterId(defaultProfile.id)
-        return listOf(defaultProfile)
     }
 
     fun addCharacter(profile: Profile) {

@@ -115,13 +115,22 @@ fun VoiceCloneScreen(
         isOffline = capabilities == null || !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
-    // Load slot status
+    // Load slot status, then cross-check with actual Firestore voices.
+    // If slotUsed says full but no real voices exist, the count is stale — allow cloning.
     LaunchedEffect(Unit) {
         checkNetworkStatus()
-        userVoiceManager.getSlotStatus().onSuccess {
-            slotStatus = it
-            isSlotFull = it.isFull
+        userVoiceManager.getSlotStatus().onSuccess { status ->
+            slotStatus = status
             slotStatusError = null
+            if (status.isFull) {
+                userVoiceManager.getClonedVoices().onSuccess { voices ->
+                    isSlotFull = voices.isNotEmpty()
+                }.onFailure {
+                    isSlotFull = true // can't verify, stay conservative
+                }
+            } else {
+                isSlotFull = false
+            }
         }.onFailure { e ->
             slotStatusError = userVoiceManager.getUserFriendlyErrorMessage(e)
             Log.e("VoiceClone", "Failed to load slot status: ${e.message}")

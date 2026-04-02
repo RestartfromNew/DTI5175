@@ -89,7 +89,10 @@ import com.example.chatpart.domain.Message
 import com.example.chatpart.domain.Role
 import com.example.chatpart.llm.AITest
 import com.example.chatpart.firestore.UserVoiceManager
+import com.example.chatpart.firestore.FirestoreManager
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import androidx.compose.runtime.rememberCoroutineScope
 import java.util.UUID
 
 data class TabItem(
@@ -359,7 +362,11 @@ class MainActivity : ComponentActivity() {
                             },
                             onCreateNew = {
                                 editingCharacter = null
-                                navigateTo(PAGE_CREATE_CHARACTER)
+                                onboardingGender = null
+                                onboardingAvatar = null
+                                onboardingName = ""
+                                onboardingRelationship = ""
+                                navigateTo(PAGE_GENDER_SELECT)
                             },
                             onEdit = { profile ->
                                 editingCharacter = profile
@@ -468,28 +475,104 @@ class MainActivity : ComponentActivity() {
                         LanguageSelectionScreen(
                             isDarkMode = isDarkMode,
                             onLanguageSelected = { langCode ->
-                                navigateTo(PAGE_CREATE_CHARACTER)
+                                navigateTo(PAGE_GENDER_SELECT)
                             },
                             onSkip = {
-                                navigateTo(PAGE_CREATE_CHARACTER)
+                                navigateTo(PAGE_GENDER_SELECT)
                             }
                         )
                     }
                     PAGE_GENDER_SELECT -> {
-                        // Redirect to unified Create Character Wizard
-                        navigateTo(PAGE_CREATE_CHARACTER)
+                        GenderSelectionScreen(
+                            isDarkMode = isDarkMode,
+                            onGenderSelected = { gender ->
+                                onboardingGender = gender
+                                navigateTo(PAGE_AVATAR_SELECT)
+                            },
+                            onSkip = {
+                                onboardingGender = "其他"
+                                navigateTo(PAGE_AVATAR_SELECT)
+                            }
+                        )
                     }
                     PAGE_AVATAR_SELECT -> {
-                        // Redirect to unified Create Character Wizard
-                        navigateTo(PAGE_CREATE_CHARACTER)
+                        AvatarSelectionScreen(
+                            isDarkMode = isDarkMode,
+                            selectedGender = onboardingGender ?: "其他",
+                            onAvatarSelected = { avatar ->
+                                onboardingAvatar = avatar
+                                navigateTo(PAGE_CHARACTER_BASIC)
+                            },
+                            onBack = { goBack() },
+                            onSkip = {
+                                onboardingAvatar = "👤"
+                                navigateTo(PAGE_CHARACTER_BASIC)
+                            }
+                        )
                     }
                     PAGE_CHARACTER_BASIC -> {
-                        // Redirect to unified Create Character Wizard
-                        navigateTo(PAGE_CREATE_CHARACTER)
+                        CharacterBasicScreen(
+                            isDarkMode = isDarkMode,
+                            selectedGender = onboardingGender ?: "其他",
+                            selectedAvatar = onboardingAvatar ?: "👤",
+                            onNext = { name, relationship ->
+                                onboardingName = name
+                                onboardingRelationship = relationship
+                                navigateTo(PAGE_CHARACTER_DETAIL)
+                            },
+                            onBack = { goBack() },
+                            onSkip = {
+                                onboardingName = "Character"
+                                onboardingRelationship = "朋友"
+                                navigateTo(PAGE_CHARACTER_DETAIL)
+                            }
+                        )
                     }
                     PAGE_CHARACTER_DETAIL -> {
-                        // Redirect to unified Create Character Wizard
-                        navigateTo(PAGE_CREATE_CHARACTER)
+                        val basicProfile = Profile(
+                            id = "char_${System.currentTimeMillis()}",
+                            name = onboardingName.ifBlank { "Character" },
+                            gender = onboardingGender ?: "其他",
+                            relationship = onboardingRelationship.ifBlank { "朋友" },
+                            background = "",
+                            customAvatarPath = onboardingAvatar?.takeIf { it.startsWith("/") }
+                        )
+                        val isOnboarding = !manager.isCompleted()
+                        CharacterDetailScreen(
+                            isDarkMode = isDarkMode,
+                            basicProfile = basicProfile,
+                            onSave = { profile ->
+                                if (isOnboarding) {
+                                    pendingVoiceCloneProfile = profile
+                                    voiceCloneFromOnboarding = true
+                                    navigateTo(PAGE_VOICE_CLONE)
+                                } else {
+                                    characterStorage.addCharacter(profile)
+                                    characters = characterStorage.loadCharacters()
+                                    characterStorage.saveSelectedCharacterId(profile.id)
+                                    selectedCharacter = profile
+                                    chatTargetBotId = "custom_${profile.id}"
+                                    mainSelectedTab = 0
+                                    navigateTo(PAGE_MAIN)
+                                }
+                            },
+                            onBack = { goBack() },
+                            onSkip = {
+                                if (isOnboarding) {
+                                    pendingVoiceCloneProfile = basicProfile
+                                    voiceCloneFromOnboarding = true
+                                    navigateTo(PAGE_VOICE_CLONE)
+                                } else {
+                                    characterStorage.addCharacter(basicProfile)
+                                    characters = characterStorage.loadCharacters()
+                                    characterStorage.saveSelectedCharacterId(basicProfile.id)
+                                    selectedCharacter = basicProfile
+                                    chatTargetBotId = "custom_${basicProfile.id}"
+                                    mainSelectedTab = 0
+                                    navigateTo(PAGE_MAIN)
+                                }
+                            }
+                        )
                     }
                     PAGE_VOICE_CLONE -> {
                         if (userVoiceManager == null) {
