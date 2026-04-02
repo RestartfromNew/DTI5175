@@ -214,16 +214,12 @@ fun LiveVoiceScreen(
                 android.util.Log.d("AvatarDebug", "generateAiVideo called, replyText = $replyText")
                 val result = videoManager.generateVideo(currentCharacter, replyText)
                 val videoUrl = result.video_url
-<<<<<<< Updated upstream
                 android.util.Log.d("AvatarDebug", "videoUrl = $videoUrl")
-                botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
-=======
                 lastGeneratedVideoUrl = videoUrl
                 // Only auto-show if video is already enabled by user
                 if (botVideoSource != BotVideoSource.None) {
                     botVideoSource = BotVideoSource.RemoteVideo(videoUrl)
                 }
->>>>>>> Stashed changes
             } catch (e: Exception) {
                 android.util.Log.e("AvatarDebug", "generateAiVideo failed: ${e.message}", e)
             }
@@ -430,9 +426,6 @@ fun LiveVoiceScreen(
         }
 
         // 3. 中央区域 — 无视频时显示能量球，有主画面内容时显示 BotVideoArea
-<<<<<<< Updated upstream
-        // var botVideoSource by remember { mutableStateOf<BotVideoSource>(BotVideoSource.AvatarImage) }
-
         when (botVideoSource) {
             is BotVideoSource.None -> {
                 CentralEnergyBall(
@@ -440,10 +433,7 @@ fun LiveVoiceScreen(
                     modifier = Modifier.align(Alignment.Center)
                 )
             }
-
-            is BotVideoSource.AvatarImage,
-            is BotVideoSource.LocalSample,
-            is BotVideoSource.RemoteVideo -> {
+            else -> {
                 BotVideoArea(
                     source = botVideoSource,
                     characterImageUri = selectedCharacterImageUri,
@@ -452,35 +442,16 @@ fun LiveVoiceScreen(
                         .fillMaxWidth()
                         .padding(horizontal = 24.dp)
                         .height(360.dp)
-                        .clip(RoundedCornerShape(20.dp)),
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0x33FFFFFF)),
                     onRemoteVideoFinished = {
-                        botVideoSource = BotVideoSource.AvatarImage
+                        // When video ends, go back to static image mode (if still in video mode)
+                        if (botVideoSource != BotVideoSource.None) {
+                            botVideoSource = BotVideoSource.AvatarImage
+                        }
                     }
                 )
             }
-=======
-
-        // 3. 中央区域 — 处理视频与语音模式的切换
-        if (botVideoSource == BotVideoSource.None) {
-            // 语音通话模式：纯能量球
-            CentralEnergyBall(
-                isAISpeaking = isAISpeaking,
-                modifier = Modifier.align(Alignment.Center)
-            )
-        } else {
-            // 视频模式开启：显示预留的视频大方框
-            BotVideoArea(
-                source = botVideoSource,
-                characterImageUri = selectedCharacterImageUri,
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp)
-                    .height(360.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0x33FFFFFF)) // 即使没内容，也显示一个磨砂质感的背景占位
-            )
->>>>>>> Stashed changes
         }
 
         // 4. 字幕区域（能量球下方）

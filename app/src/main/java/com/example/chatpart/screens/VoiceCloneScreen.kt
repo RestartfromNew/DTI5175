@@ -594,10 +594,15 @@ fun VoiceCloneScreen(
                         // Launch cloning in background
 
                         scope.launch {
-                            if (recordedFile != null) {
-<<<<<<< Updated upstream
+                            val file = recordedFile
+                            if (file != null) {
+                                // 1. SECURITY: Ensure user document exists (recreates it if manually deleted)
+                                val userEmail = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email ?: "demo@example.com"
+                                userVoiceManager.ensureUserExists(userEmail)
+                                
+                                // 2. Call MiniMax cloning
                                 val result = minimaxManager.cloneVoice(
-                                    audioFile = recordedFile!!,
+                                    audioFile = file,
                                     characterId = characterId,
                                     uid = uid
                                 )
@@ -605,9 +610,10 @@ fun VoiceCloneScreen(
                                 if (result.isSuccess) {
                                     val voiceId = result.getOrThrow()
 
+                                    // 3. Upload reference assets (Audio + Transcript) for future use
                                     try {
                                         val uploadResult = voiceCloneManager.uploadReferenceAssets(
-                                            audioFile = recordedFile!!,
+                                            audioFile = file,
                                             characterId = characterId,
                                             avatarPath = avatarPath,
                                             transcript = referenceTranscript
@@ -615,26 +621,6 @@ fun VoiceCloneScreen(
                                         Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
                                     } catch (e: Exception) {
                                         Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
-=======
-                                // SECURITY: Pass uid for account isolation in voice_id
-                                // 2nd safety: Ensure user document exists (recreates it if manually deleted)
-                        val userEmail = com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.email ?: "demo@example.com"
-                        userVoiceManager.ensureUserExists(userEmail)
-                        
-                        val result = minimaxManager.cloneVoice(recordedFile!!, characterId, uid)
-                                result.onSuccess { voiceId ->
-                                    scope.launch {
-                                        try {
-                                            val uploadResult = voiceCloneManager.uploadReferenceAssets(
-                                                audioFile = recordedFile!!,
-                                                characterId = characterId,
-                                                avatarPath = avatarPath
-                                            )
-                                            Log.d("VoiceDebug", "uploadReferenceAssets result = $uploadResult")
-                                        } catch (e: Exception) {
-                                            Log.e("VoiceDebug", "uploadReferenceAssets failed: ${e.message}", e)
-                                        }
->>>>>>> Stashed changes
                                     }
 
                                     val voice = ClonedVoice(
@@ -662,33 +648,37 @@ fun VoiceCloneScreen(
                                             val errorMsg = userVoiceManager.getUserFriendlyErrorMessage(firestoreError)
                                             cloneError = "$errorMsg (Voice cloned but not saved)"
 
-                                            val snackbarResult = snackbarHostState.showSnackbar(
-                                                message = "Failed to save voice: $errorMsg",
-                                                actionLabel = "Retry",
-                                                duration = SnackbarDuration.Long
-                                            )
+                                            scope.launch {
+                                                val snackbarResult = snackbarHostState.showSnackbar(
+                                                    message = "Failed to save voice: $errorMsg",
+                                                    actionLabel = "Retry",
+                                                    duration = SnackbarDuration.Long
+                                                )
 
-                                            when (snackbarResult) {
-                                                SnackbarResult.ActionPerformed -> {
-                                                    isCloning = true
-                                                    userVoiceManager.addClonedVoice(voice)
-                                                        .onSuccess {
-                                                            cloneSuccess = true
-                                                            cloneError = null
-                                                            isCloning = false
-                                                            delay(1000)
-                                                            onVoiceCloned(voiceId)
-                                                        }
-                                                        .onFailure { retryError ->
-                                                            isCloning = false
-                                                            cloneSuccess = false
-                                                            cloneError = "Failed to save: ${userVoiceManager.getUserFriendlyErrorMessage(retryError)}"
-                                                            Log.e("VoiceClone", "Retry failed: ${retryError.message}")
-                                                        }
-                                                }
-                                                SnackbarResult.Dismissed -> {
-                                                    cloneSuccess = false
-                                                    cloneError = "Voice cloned but not saved to cloud"
+                                                when (snackbarResult) {
+                                                    SnackbarResult.ActionPerformed -> {
+                                                        isCloning = true
+                                                        userVoiceManager.addClonedVoice(voice)
+                                                            .onSuccess {
+                                                                cloneSuccess = true
+                                                                cloneError = null
+                                                                isCloning = false
+                                                                scope.launch {
+                                                                    delay(1000)
+                                                                    onVoiceCloned(voiceId)
+                                                                }
+                                                            }
+                                                            .onFailure { retryError ->
+                                                                isCloning = false
+                                                                cloneSuccess = false
+                                                                cloneError = "Failed to save: ${userVoiceManager.getUserFriendlyErrorMessage(retryError)}"
+                                                                Log.e("VoiceClone", "Retry failed: ${retryError.message}")
+                                                            }
+                                                    }
+                                                    SnackbarResult.Dismissed -> {
+                                                        cloneSuccess = false
+                                                        cloneError = "Voice cloned but not saved to cloud"
+                                                    }
                                                 }
                                             }
                                         }
