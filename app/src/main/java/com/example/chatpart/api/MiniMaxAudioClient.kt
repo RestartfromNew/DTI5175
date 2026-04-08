@@ -89,7 +89,8 @@ class MiniMaxAudioClient(private val context: Context) : AudioClient {
                 voice_setting = VoiceSetting(
                     voice_id = effectiveVoiceId,
                     emotion = effectiveEmotion,
-                    language_boost = languageBoost.ifBlank { null }
+                    language_boost = languageBoost.ifBlank { null },
+                    speed = 1.2f
                 ),
                 audio_setting = AudioSetting(
                     format = MiniMaxConfig.AUDIO_FORMAT,

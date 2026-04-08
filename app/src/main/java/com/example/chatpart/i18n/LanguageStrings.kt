@@ -3,10 +3,10 @@ package com.example.chatpart.i18n
 object EnglishStrings {
     val strings = mapOf(
         // App
-        "APP_NAME" to "ChatPart",
+        "APP_NAME" to "meetsee U",
 
         // Onboarding
-        "ONBOARDING_TITLE_1" to "Welcome to ChatPart",
+        "ONBOARDING_TITLE_1" to "Welcome to meetsee U",
         "ONBOARDING_DESC_1" to "Your AI companion awaits",
         "ONBOARDING_TITLE_2" to "Cloud Sync",
         "ONBOARDING_DESC_2" to "Your data is safely stored in the cloud",
@@ -203,10 +203,10 @@ object EnglishStrings {
 object FrenchStrings {
     val strings = mapOf(
         // App
-        "APP_NAME" to "ChatPart",
+        "APP_NAME" to "meetsee U",
 
         // Onboarding
-        "ONBOARDING_TITLE_1" to "Bienvenue sur ChatPart",
+        "ONBOARDING_TITLE_1" to "Bienvenue sur meetsee U",
         "ONBOARDING_DESC_1" to "Votre compagnon IA vous attend",
         "ONBOARDING_TITLE_2" to "Synchronisation Cloud",
         "ONBOARDING_DESC_2" to "Vos données sont en sécurité dans le cloud",
@@ -403,10 +403,10 @@ object FrenchStrings {
 object ChineseStrings {
     val strings = mapOf(
         // App
-        "APP_NAME" to "ChatPart",
+        "APP_NAME" to "meetsee U",
 
         // Onboarding
-        "ONBOARDING_TITLE_1" to "欢迎使用 ChatPart",
+        "ONBOARDING_TITLE_1" to "欢迎使用 meetsee U",
         "ONBOARDING_DESC_1" to "你的 AI 伙伴在这里等你",
         "ONBOARDING_TITLE_2" to "云同步",
         "ONBOARDING_DESC_2" to "你的数据安全地存储在云端",

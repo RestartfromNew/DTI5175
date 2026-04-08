@@ -73,7 +73,7 @@ import com.example.chatpart.data.CharacterStorage
 import com.example.chatpart.data.VoiceAssignmentPreferences
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.Languages
-import com.example.chatpart.ui.theme.ChatPartTheme
+import com.example.chatpart.ui.theme.MeetseeUTheme
 import com.example.chatpart.ui.theme.Lavender
 import com.example.chatpart.ui.theme.Peach
 import com.google.firebase.Firebase
@@ -345,7 +345,7 @@ class MainActivity : ComponentActivity() {
             var currentVoiceCallCharacter by remember { mutableStateOf<Profile?>(null) }
 
             // Apply theme based on dark mode
-            ChatPartTheme(darkTheme = isDarkMode) {
+            MeetseeUTheme(darkTheme = isDarkMode) {
                 when (currentPage) {
                     PAGE_ONBOARDING_1 -> {
                         OnboardingScreen(

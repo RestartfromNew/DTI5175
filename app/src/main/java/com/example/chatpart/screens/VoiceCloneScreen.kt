@@ -46,6 +46,7 @@ import com.example.chatpart.firestore.UserVoiceManager
 import com.example.chatpart.i18n.Languages
 import com.example.chatpart.i18n.LanguageManager
 import com.example.chatpart.i18n.VoiceCloneManager
+import com.example.chatpart.api.DeepgramAsrClient
 import com.example.chatpart.voice.AudioRecordManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -95,8 +96,10 @@ fun VoiceCloneScreen(
     var cloneError by remember { mutableStateOf<String?>(null) }
     var hasPermission by remember { mutableStateOf(false) }
     var referenceTranscript by remember { mutableStateOf("") }
+    var isTranscribing by remember { mutableStateOf(false) }
     val minimaxManager = remember { MiniMaxVoiceCloneManager(context) }
     val voiceCloneManager = remember { VoiceCloneManager(context) }
+    val deepgramClient = remember { DeepgramAsrClient() }
 
     // Network status
     var isOffline by remember { mutableStateOf(false) }
@@ -419,11 +422,13 @@ fun VoiceCloneScreen(
 
                                         if (file != null) {
                                             scope.launch {
-                                                //val transcript = voiceCloneManager.tryGenerateTranscript(file)
-
-                                                //referenceTranscript = transcript
-                                                //Log.d("VoiceDebug", "referenceTranscript = $referenceTranscript")
+                                                isTranscribing = true
+                                                referenceTranscript = ""
                                                 Log.d("VoiceDebug", "recorded file = ${file.absolutePath}")
+                                                val transcript = deepgramClient.transcribe(file)
+                                                Log.d("VoiceDebug", "referenceTranscript = $transcript")
+                                                referenceTranscript = transcript
+                                                isTranscribing = false
                                             }
                                         }
                                     }
@@ -521,24 +526,46 @@ fun VoiceCloneScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            OutlinedTextField(
-                value = referenceTranscript,
-                onValueChange = { referenceTranscript = it },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Reference transcript") },
-                placeholder = { Text("Enter the exact words spoken in the reference audio") },
-                minLines = 3,
-                shape = RoundedCornerShape(12.dp),
-                enabled = !isCloning,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = peachColor,
-                    unfocusedBorderColor = hintColor.copy(alpha = 0.4f),
-                    focusedTextColor = textColor,
-                    unfocusedTextColor = textColor,
-                    focusedContainerColor = surfaceColor,
-                    unfocusedContainerColor = surfaceColor
+            if (isTranscribing) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = peachColor,
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Transcribing...",
+                        fontSize = 13.sp,
+                        color = hintColor
+                    )
+                }
+            } else if (recordedFile != null) {
+                OutlinedTextField(
+                    value = referenceTranscript,
+                    onValueChange = { referenceTranscript = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Reference transcript") },
+                    placeholder = { Text("Auto-transcribed — edit if needed") },
+                    minLines = 3,
+                    shape = RoundedCornerShape(12.dp),
+                    enabled = !isCloning,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = peachColor,
+                        unfocusedBorderColor = hintColor.copy(alpha = 0.4f),
+                        focusedTextColor = textColor,
+                        unfocusedTextColor = textColor,
+                        focusedContainerColor = surfaceColor,
+                        unfocusedContainerColor = surfaceColor
+                    )
                 )
-            )
+            }
 
             Spacer(modifier = Modifier.height(16.dp))
             // Buttons
@@ -584,8 +611,9 @@ fun VoiceCloneScreen(
                             cloneError = "Recording too short. Please record at least 10 seconds."
                             return@Button
                         }
-                        if (referenceTranscript.isBlank()) {
-                            cloneError = "Please enter the transcript of the reference audio."
+                        // transcript is auto-filled by Deepgram; allow empty but warn
+                        if (isTranscribing) {
+                            cloneError = "Please wait for transcription to finish."
                             return@Button
                         }
                         // Start cloning
@@ -710,7 +738,7 @@ fun VoiceCloneScreen(
                         containerColor = if (isSlotFull) hintColor else peachColor,
                         contentColor = Color.White
                     ),
-                    enabled = recordedFile != null && !isCloning && !isSlotFull
+                    enabled = recordedFile != null && !isCloning && !isSlotFull && !isTranscribing
                 ) {
                     Text(sendCloneText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 }

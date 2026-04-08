@@ -34,7 +34,7 @@ class DeepgramAsrClient {
      */
     suspend fun transcribe(wavFile: File): String = withContext(Dispatchers.IO) {
         val request = Request.Builder()
-            .url("$BASE_URL?model=nova-3&language=en&smart_format=true")
+            .url("$BASE_URL?model=nova-3&language=multi&smart_format=true")
             .header("Authorization", "Token ${BuildConfig.DEEPGRAM_API_KEY}")
             .header("Content-Type", "audio/wav")
             .post(wavFile.readBytes().toRequestBody("audio/wav".toMediaType()))
