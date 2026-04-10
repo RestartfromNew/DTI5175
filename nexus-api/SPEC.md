@@ -1,4 +1,4 @@
-# MiniMax Voice Manager — SPEC.md
+# Nexus Backend — SPEC.md
 
 ## 1. Concept & Vision
 

@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Optional
 from pydantic_settings import BaseSettings
 
 load_dotenv()
@@ -13,6 +14,7 @@ class Settings(BaseSettings):
     server_port: int = 8000
     log_dir: Path = Path("logs")
     max_slots: int = 10
+    firebase_service_account_path: Optional[str] = None
 
     class Config:
         env_file = ".env"

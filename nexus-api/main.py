@@ -5,14 +5,18 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from core.config import settings
 from core.ratelimit import limiter
+from core.firebase import fb
 from routers import voices, admin, health
 from pathlib import Path
 
 app = FastAPI(
-    title="MiniMax Voice Manager",
-    description="Manage MiniMax voice cloning slots via REST API",
+    title="Nexus Backend",
+    description="MiniMax & Firebase powered backend service",
     version="1.0.0",
 )
+
+# Initialize Firebase
+fb.initialize()
 
 # Rate limiting
 app.state.limiter = limiter

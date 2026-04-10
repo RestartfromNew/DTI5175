@@ -1,9 +1,9 @@
-import json
-import os
-from pathlib import Path
-from datetime import datetime
 from typing import Optional
+from datetime import datetime
+import json
+from pathlib import Path
 from core.config import settings
+from core.firebase import fb
 
 LOG_FILE = settings.log_dir / "operations.jsonl"
 MAX_LINES = 500
@@ -29,14 +29,34 @@ class OpLogger:
             "detail": detail,
             "locale": locale,
         }
-        lines = self._read_lines()
-        lines.append(json.dumps(entry, ensure_ascii=False))
-        if len(lines) > MAX_LINES:
-            lines = lines[-MAX_LINES:]
-        settings.log_dir.mkdir(parents=True, exist_ok=True)
-        LOG_FILE.write_text("\n".join(lines) + "\n")
+        
+        # Log to local file
+        try:
+            lines = self._read_lines()
+            lines.append(json.dumps(entry, ensure_ascii=False))
+            if len(lines) > MAX_LINES:
+                lines = lines[-MAX_LINES:]
+            LOG_FILE.write_text("\n".join(lines) + "\n")
+        except Exception as e:
+            print(f"Local logging failed: {e}")
+
+        # Log to Firebase
+        try:
+            if fb.db:
+                fb.db.collection("operations").add(entry)
+        except Exception as e:
+            print(f"Firebase logging failed: {e}")
 
     def get_logs(self, limit: int = 50) -> list[dict]:
+        # Try Firebase first for logs
+        try:
+            if fb.db:
+                docs = fb.db.collection("operations").order_by("timestamp", direction="DESCENDING").limit(limit).stream()
+                return [doc.to_dict() for doc in docs]
+        except Exception as e:
+            print(f"Failed to fetch logs from Firebase: {e}")
+
+        # Fallback to local file
         lines = self._read_lines()
         parsed = []
         for line in lines[-limit:]:
@@ -49,6 +69,8 @@ class OpLogger:
     def clear_logs(self):
         if LOG_FILE.exists():
             LOG_FILE.unlink()
+        # Note: Clearing Firebase logs is usually not done via simple one-liner for collections.
+        # Leaving it for now or could implement batch delete.
 
     def _read_lines(self) -> list[str]:
         if not LOG_FILE.exists():
