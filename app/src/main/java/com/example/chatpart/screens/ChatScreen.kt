@@ -437,12 +437,15 @@ fun ChatScreen(
                                     "fr" -> "French"
                                     else -> ""
                                 }
+                                val assignedVoiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.id)
+                                    ?: voiceAssignmentPrefs?.getVoiceId(selectedBot.profileId ?: "")
+                                    ?: selectedBot.voiceId
+                                    ?: resolveProfile()?.voiceId
+                                    ?: "English_Graceful_Lady"
+
                                 val filePath = audioClient.textToVoice(
                                     text = text,
-                                    voiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.profileId ?: selectedBot.id)
-                                        ?: selectedBot.voiceId
-                                        ?: resolveProfile()?.voiceId
-                                        ?: "English_Graceful_Lady",
+                                    voiceId = assignedVoiceId,
                                     emotion = "calm",
                                     languageBoost = boost
                                 )
@@ -487,12 +490,15 @@ fun ChatScreen(
                                 try {
                                     // 1. Indicate loading on this bubble (handled by refreshing the state)
                                     // 2. Generate with current voice settings
+                                    val assignedVoiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.id)
+                                        ?: voiceAssignmentPrefs?.getVoiceId(selectedBot.profileId ?: "")
+                                        ?: selectedBot.voiceId
+                                        ?: resolveProfile()?.voiceId
+                                        ?: "English_Graceful_Lady"
+
                                     val newFilePath = audioClient.textToVoice(
                                         text = voiceMessage.subtitle ?: voiceMessage.text,
-                                        voiceId = voiceAssignmentPrefs?.getVoiceId(selectedBot.profileId ?: selectedBot.id)
-                                            ?: selectedBot.voiceId
-                                            ?: resolveProfile()?.voiceId
-                                            ?: "English_Graceful_Lady",
+                                        voiceId = assignedVoiceId,
                                         emotion = "happy",
                                         languageBoost = if (currentLanguage == "zh") "Chinese" else ""
                                     )
@@ -514,7 +520,8 @@ fun ChatScreen(
                                 }
                             }
                         }
-                    }
+                    },
+                    onHaptic = { triggerHapticFeedback() }
                 )
             }
         }
@@ -1066,7 +1073,8 @@ fun ChatBubble(
     showSubtitle: Boolean = false,
     onToggleSubtitle: (() -> Unit)? = null,
     onTts: ((String) -> Unit)? = null,
-    onStt: ((ChatMessage) -> Unit)? = null
+    onStt: ((ChatMessage) -> Unit)? = null,
+    onHaptic: (() -> Unit)? = null
 ) {
     val defaultBot = botAvatar ?: DefaultChatbots.get().firstOrNull() ?: ChatbotAvatar(
         id = "assistant",
@@ -1131,7 +1139,10 @@ fun ChatBubble(
                         .widthIn(max = 260.dp)
                         .then(
                             if (message.isVoice && onStt != null)
-                                Modifier.clickable { onStt(message) }
+                                Modifier.clickable { 
+                                    onHaptic?.invoke()
+                                    onStt(message) 
+                                }
                             else Modifier
                         )
                 ) {
@@ -1248,7 +1259,10 @@ fun ChatBubble(
         }
         if (!isUser && onTts != null && !message.isVoice) {
             IconButton(
-                onClick = { onTts(message.text) },
+                onClick = { 
+                    onHaptic?.invoke()
+                    onTts(message.text) 
+                },
                 modifier = Modifier.padding(start = 36.dp).size(28.dp)
             ) {
                 Icon(

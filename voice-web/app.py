@@ -177,12 +177,22 @@ HTML_TEMPLATE = """
         <table id="voices-table">
             <tr>
                 <th>Name / Note</th>
+                <th>Owner (User)</th>
                 <th>Voice ID</th>
                 <th>Action</th>
             </tr>
             {% for v in voices %}
             <tr id="row-{{ v.voice_id }}">
                 <td>{{ v.name | default('Unnamed Voice', true) }}</td>
+                <td>
+                    {% if voice_to_user[v.voice_id] %}
+                        <span style="color: #60a5fa; cursor: pointer; text-decoration: underline;" onclick="showUserData('{{ voice_to_user[v.voice_id].uid }}')">
+                            {{ voice_to_user[v.voice_id].name }}
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-style: italic;">Ghost Voice</span>
+                    {% endif %}
+                </td>
                 <td style="font-family: monospace;">{{ v.voice_id }}</td>
                 <td>
                     <button class="btn-delete" onclick="deleteVoice('{{ v.voice_id }}')">Delete</button>
@@ -344,10 +354,25 @@ def index():
         print(f"Error fetching voices: {e}")
         voices = []
     
-    
     users = fetch_firebase_users()
     payments = fetch_processed_payments()
-    return render_template_string(HTML_TEMPLATE, voices=voices, users=users, payments=payments)
+    
+    # Create a mapping of voice_id -> user_info
+    voice_to_user = {}
+    for u in users:
+        # We need to fetch the full doc to get the 'voices' array
+        user_doc = get_user_data(u["uid"])
+        user_voices = user_doc.get("voices", [])
+        for uv in user_voices:
+            vid = uv.get("voiceId")
+            if vid:
+                voice_to_user[vid] = {
+                    "name": u["name"],
+                    "email": u["email"],
+                    "uid": u["uid"]
+                }
+
+    return render_template_string(HTML_TEMPLATE, voices=voices, users=users, payments=payments, voice_to_user=voice_to_user)
 
 @app.route("/api/delete", methods=["POST"])
 def api_delete():

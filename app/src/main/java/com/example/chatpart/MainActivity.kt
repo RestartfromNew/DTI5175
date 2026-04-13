@@ -705,13 +705,19 @@ class MainActivity : ComponentActivity() {
                             goBack()
                         } else {
                             val manager = userVoiceManager!!
+                            val defaultBots = listOf(
+                                CharacterInfo("assistant", "Assistant", "🤖", isDefault = true),
+                                CharacterInfo("teacher", "Teacher", "👩‍🏫", isDefault = true),
+                                CharacterInfo("coding", "Coder", "💻", isDefault = true)
+                            )
+                            val customBots = characters.map { CharacterInfo(it.id, it.name, "👤", isDefault = false) }
                             VoiceManagementScreen(
                                 isDarkMode = isDarkMode,
                                 currentLanguage = currentLanguage,
                                 characterStorage = characterStorage,
                                 userVoiceManager = manager,
                                 voiceAssignmentPrefs = voiceAssignmentPrefs,
-                                allCharacters = characters.map { CharacterInfo(it.id, it.name, "👤", isDefault = false) },
+                                allCharacters = defaultBots + customBots,
                                 onNavigateToVoiceClone = {
                                     pendingVoiceCloneProfile = Profile(
                                         id = "temp_voice_${System.currentTimeMillis()}",
