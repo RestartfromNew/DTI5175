@@ -40,13 +40,8 @@ app.include_router(admin.router)
 
 @app.get("/")
 async def root():
-    return {
-        "service": "MiniMax Voice Manager",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "dashboard": "/dashboard",
-        "health": "/health",
-    }
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/dashboard")
 
 
 if __name__ == "__main__":

@@ -39,3 +39,20 @@ async def revoke_key(key_id: str, _: str = Depends(require_admin)):
     if not ok:
         raise HTTPException(status_code=404, detail="Key not found")
     return ApiResponse(success=True, message="Key revoked")
+
+
+@router.get("/users", response_model=ApiResponse)
+async def list_users(_: str = Depends(require_admin)):
+    from core.firebase import fb
+    try:
+        if fb.db:
+            docs = fb.db.collection("users").stream()
+            users = []
+            for doc in docs:
+                u = doc.to_dict()
+                u["uid"] = doc.id
+                users.append(u)
+            return ApiResponse(success=True, data={"users": users})
+        return ApiResponse(success=False, message="Firebase not initialized")
+    except Exception as e:
+        return ApiResponse(success=False, message=str(e))

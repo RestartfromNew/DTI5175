@@ -4,11 +4,23 @@ import json
 import ssl
 import traceback
 
+import firebase_admin
+from firebase_admin import credentials, firestore, auth
+
 API_KEY = "sk-api-52OCR6lwxIhoq1S998vNVRhT7qziYZQ7O41KOjMIui7abNsoYVQwrSTBuY30JdOi17s2KYh6OG6Mngr91Vt56pYPizTxSFIukzJaP8GRfnCHtCcVduKcYsU"
 BASE_URL = "https://api.minimax.io"
 SSL_CTX = ssl._create_unverified_context()
 
 app = Flask(__name__)
+
+# Initialize Firebase using the credentials detected on the VPS
+try:
+    cred = credentials.Certificate("/home/ubuntu/nexus-api/chat-chat-chat-fc723-firebase-adminsdk-fbsvc-afc5fef408.json")
+    firebase_admin.initialize_app(cred)
+    db = firestore.client()
+except Exception as e:
+    print(f"Failed to initialize Firebase: {e}")
+    db = None
 
 def api_post(endpoint, payload):
     data = json.dumps(payload).encode()
@@ -32,7 +44,6 @@ def api_post(endpoint, payload):
 def fetch_voices():
     res = api_post("/v1/get_voice", {"voice_type": "voice_cloning"})
     if not res: return []
-    # The dictionary keys returned by minimax can slightly vary ("voices" vs "voice_cloning")
     voices = res.get("voice_cloning") or res.get("voices") or []
     return voices
 
@@ -45,16 +56,85 @@ def delete_voice(voice_id):
         return True
     return False
 
+def fetch_firebase_users():
+    if not db: return []
+    users = []
+    try:
+        docs = db.collection("users").stream()
+        for doc in docs:
+            d = doc.to_dict()
+            uid = doc.id
+            
+            name = "Unknown"
+            try:
+                auth_user = auth.get_user(uid)
+                if auth_user.display_name:
+                    name = auth_user.display_name
+            except Exception:
+                pass
+                
+            users.append({
+                "uid": uid,
+                "email": d.get("email", "No Email"),
+                "name": name,
+                "slot_used": d.get("slotUsed", 0),
+                "slot_limit": d.get("slotLimit", 3)
+            })
+    except Exception as e:
+        print(f"Error fetching firebase users: {e}")
+    return users
+
+def fetch_processed_payments():
+    if not db: return []
+    payments = []
+    try:
+        # Fetch last 50 successful payments
+        docs = db.collection("processed_payments").limit(50).stream()
+        for doc in docs:
+            d = doc.to_dict()
+            
+            # Format timestamp
+            ts = d.get("processedAt")
+            ts_str = "Unknown"
+            if ts:
+                try:
+                    # If it's a Firestore Timestamp, it has a to_datetime() method or is already a datetime
+                    if hasattr(ts, "strftime"):
+                        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S")
+                    else:
+                        ts_str = str(ts)
+                except:
+                    ts_str = str(ts)
+
+            payments.append({
+                "pi_id": doc.id,
+                "uid": d.get("uid", "N/A"),
+                "slot_increment": d.get("slotIncrement", 0),
+                "price_id": d.get("priceId", "N/A"),
+                "processed_at": ts_str
+            })
+    except Exception as e:
+        print(f"Error fetching payments: {e}")
+    return payments
+
+def get_user_data(uid):
+    if not db: return {}
+    doc = db.collection("users").document(uid).get()
+    if doc.exists:
+        return doc.to_dict()
+    return {}
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>MiniMax Voice Dashboard</title>
+    <title>Management Dashboard (MiniMax & Firebase)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 20px; }
         .container { max-width: 900px; margin: 0 auto; background: #1e293b; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
         h1 { margin-top: 0; color: #38bdf8; border-bottom: 2px solid #334155; padding-bottom: 15px; }
+        h2 { color: #f472b6; margin-top: 40px; border-bottom: 2px solid #334155; padding-bottom: 10px; }
         .header-actions { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .slots { font-size: 1.2rem; font-weight: 600; background: #334155; padding: 10px 15px; border-radius: 8px; }
         .slots.red { color: #f87171; }
@@ -71,6 +151,10 @@ HTML_TEMPLATE = """
         th { background: #334155; font-weight: 600; color: #cbd5e1; }
         tr:last-child td { border-bottom: none; }
         #status-msg { margin-top: 15px; font-weight: bold; height: 20px; }
+        
+        /* Modal Styles */
+        #modalOverlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:999; backdrop-filter: blur(2px); }
+        #userModal { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%, -50%); background:#1e293b; padding:25px; border-radius:12px; z-index:1000; width:85%; max-width:600px; box-shadow:0 10px 25px rgba(0,0,0,0.5); border: 1px solid #475569; }
     </style>
 </head>
 <body>
@@ -110,6 +194,66 @@ HTML_TEMPLATE = """
             </tr>
             {% endfor %}
         </table>
+
+        <!-- Firebase Section -->
+        <h2>Firebase Authenticated Users</h2>
+        <table id="users-table">
+            <tr>
+                <th>UID</th>
+                <th>Slots Usage</th>
+                <th>Name</th>
+                <th>Email</th>
+            </tr>
+            {% for u in users %}
+            <tr onclick="showUserData('{{ u.uid }}')" style="cursor: pointer; transition: background 0.2s;" onmouseover="this.style.background='#334155'" onmouseout="this.style.background='transparent'" title="Click to view full data">
+                <td style="font-family: monospace; color: #60a5fa;">{{ u.uid }}</td>
+                <td>
+                    <span style="background: #0f172a; padding: 4px 8px; border-radius: 4px; font-weight: bold; border: 1px solid #334155; font-size: 0.9em; {% if u.slot_used >= u.slot_limit %}color: #f87171;{% else %}color: #4ade80;{% endif %}">
+                        {{ u.slot_used }} / {{ u.slot_limit }}
+                    </span>
+                </td>
+                <td>{{ u.name }}</td>
+                <td>{{ u.email }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" style="text-align: center; color: #94a3b8;">No Firebase users found or DB Error.</td>
+            </tr>
+            {% endfor %}
+        </table>
+
+        <!-- Payments Section -->
+        <h2>Recent Payments (Stripe Success)</h2>
+        <table id="payments-table">
+            <tr>
+                <th>Payment ID (PI)</th>
+                <th>UID</th>
+                <th>Slots +</th>
+                <th>Processed At</th>
+            </tr>
+            {% for p in payments %}
+            <tr>
+                <td style="font-family: monospace; font-size: 0.85em; color: #94a3b8;">{{ p.pi_id }}</td>
+                <td style="font-family: monospace; color: #60a5fa; cursor: pointer;" onclick="showUserData('{{ p.uid }}')">{{ p.uid }}</td>
+                <td>
+                    <span style="color: #4ade80; font-weight: bold;">+{{ p.slot_increment }}</span>
+                </td>
+                <td style="color: #94a3b8; font-size: 0.9em;">{{ p.processed_at }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align: center; color: #94a3b8;">No payment records found.</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <!-- User Data Popup Modal -->
+    <div id="modalOverlay" onclick="closeModal()"></div>
+    <div id="userModal">
+        <h3 id="modalTitle" style="color:#f8fafc; margin-top:0;">User Data payload</h3>
+        <pre id="modalContent" style="background:#0f172a; padding:15px; border-radius:8px; overflow-x:auto; color:#a5b4fc; font-size:14px; max-height:400px; overflow-y:auto; font-family: monospace;"></pre>
+        <button onclick="closeModal()" class="btn-refresh" style="margin-top:15px; width: 100%;">Close</button>
     </div>
 
     <script>
@@ -158,6 +302,35 @@ HTML_TEMPLATE = """
                 showMsg("Network error.", true);
             }
         }
+
+        async function showUserData(uid) {
+            try {
+                document.getElementById('modalTitle').innerText = 'Loading data for UID: ' + uid + '...';
+                document.getElementById('modalContent').innerText = 'Loading...';
+                document.getElementById('modalOverlay').style.display = 'block';
+                document.getElementById('userModal').style.display = 'block';
+
+                const res = await fetch('/api/user/' + uid);
+                const data = await res.json();
+                
+                document.getElementById('modalTitle').innerText = 'Data for UID: ' + uid;
+                document.getElementById('modalContent').innerText = JSON.stringify(data, null, 2);
+            } catch(e) {
+                document.getElementById('modalContent').innerText = "Error fetching User Data";
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('modalOverlay').style.display = 'none';
+            document.getElementById('userModal').style.display = 'none';
+        }
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === "Escape") {
+                closeModal();
+            }
+        });
     </script>
 </body>
 </html>
@@ -170,7 +343,11 @@ def index():
     except Exception as e:
         print(f"Error fetching voices: {e}")
         voices = []
-    return render_template_string(HTML_TEMPLATE, voices=voices)
+    
+    
+    users = fetch_firebase_users()
+    payments = fetch_processed_payments()
+    return render_template_string(HTML_TEMPLATE, voices=voices, users=users, payments=payments)
 
 @app.route("/api/delete", methods=["POST"])
 def api_delete():
@@ -191,6 +368,11 @@ def api_delete_all():
     if success:
         return jsonify({"success": True})
     return jsonify({"error": "Failed to delete all"}), 500
+
+@app.route("/api/user/<uid>")
+def api_get_user(uid):
+    data = get_user_data(uid)
+    return jsonify(data)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=80)

@@ -112,6 +112,12 @@ tbody input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accen
   .sidebar { order: -1; }
   .voice-id { max-width: 120px; }
 }
+/* Tabs */
+.tabs { display: flex; gap: 24px; margin-bottom: 24px; border-bottom: 1px solid #2a2d3a; padding: 0 4px; }
+.tab { padding: 12px 4px; font-size: 14px; font-weight: 600; color: #6b7280; cursor: pointer; position: relative; transition: color 0.15s; }
+.tab:hover { color: #e0e0e0; }
+.tab.active { color: #38bdf8; }
+.tab.active::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 2px; background: #38bdf8; border-radius: 2px 2px 0 0; }
 </style>
 </head>
 <body>
@@ -122,6 +128,10 @@ tbody input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accen
     <div class="api-status">
       <span class="status-dot" id="statusDot"></span>
       <span id="statusText" data-i18n="connected">—</span>
+    </div>
+    <div class="api-key-input" style="display:flex; align-items:center; gap:8px;">
+      <input type="password" id="nexusKeyInput" placeholder="Enter API Key" style="background:#2a2d3a; color:#fff; border:1px solid #3a3d4a; border-radius:6px; padding:6px 10px; font-size:12px; width:120px;">
+      <button class="btn" onclick="saveKey()" style="padding:6px 10px; font-size:12px;">OK</button>
     </div>
     <div class="lang-switcher">
       <select id="langSelect">
@@ -144,8 +154,15 @@ tbody input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accen
       <span class="slots-text" id="slotsText">0/10</span>
     </div>
 
-    <!-- Toolbar -->
-    <div class="toolbar">
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" id="tabVoices" onclick="switchTab('voices')" data-i18n="voices_tab">MiniMax Voices</div>
+      <div class="tab" id="tabUsers" onclick="switchTab('users')" data-i18n="users_tab">Firebase Accounts</div>
+      <div class="tab" id="tabKeys" onclick="switchTab('keys')" data-i18n="keys_tab">API Access</div>
+    </div>
+
+    <!-- Toolbar (Voices) -->
+    <div id="toolbarVoices" class="toolbar">
       <button class="btn primary" id="btnRefresh" onclick="loadVoices()">
         <span data-i18n="refresh">Refresh</span>
       </button>
@@ -157,22 +174,77 @@ tbody input[type="checkbox"] { width: 14px; height: 14px; cursor: pointer; accen
       </button>
     </div>
 
+    <!-- Toolbar (Users) -->
+    <div id="toolbarUsers" class="toolbar" style="display:none">
+      <button class="btn primary" onclick="loadUsers()">
+        <span data-i18n="refresh">Refresh Users</span>
+      </button>
+    </div>
+
+    <!-- Toolbar (Keys) -->
+    <div id="toolbarKeys" class="toolbar" style="display:none">
+      <button class="btn primary" onclick="showAddKeyModal()">
+        <span data-i18n="add_key">+ Create New Key</span>
+      </button>
+      <button class="btn" onclick="loadKeys()">
+        <span data-i18n="refresh">Refresh</span>
+      </button>
+    </div>
+
     <!-- Voice table -->
-    <table id="voiceTable">
-      <thead>
-        <tr>
-          <th style="width:40px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-          <th data-i18n="voice_name">Voice Name</th>
-          <th data-i18n="voice_id">Voice ID</th>
-          <th data-i18n="status">Status</th>
-          <th data-i18n="created_at">Created At</th>
-          <th data-i18n="actions">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="voiceBody">
-        <tr><td colspan="6" class="empty-state"><span data-i18n="loading">Loading...</span></td></tr>
-      </tbody>
-    </table>
+    <div id="viewVoices">
+      <table id="voiceTable">
+        <thead>
+          <tr>
+            <th style="width:40px"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+            <th data-i18n="voice_name">Voice Name</th>
+            <th data-i18n="voice_id">Voice ID</th>
+            <th data-i18n="status">Status</th>
+            <th data-i18n="created_at">Created At</th>
+            <th data-i18n="actions">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="voiceBody">
+          <tr><td colspan="6" class="empty-state"><span data-i18n="loading">Loading...</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- User table -->
+    <div id="viewUsers" style="display:none">
+      <table id="userTable">
+        <thead>
+          <tr>
+            <th>Email / UID</th>
+            <th>Slots (Used/Total)</th>
+            <th>Voices Count</th>
+            <th>Updated At</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="userBody">
+          <tr><td colspan="5" class="empty-state">No users fetched yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Keys table -->
+    <div id="viewKeys" style="display:none">
+      <table id="keysTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Key (Masked)</th>
+            <th>Status</th>
+            <th>Created At</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="keysBody">
+          <tr><td colspan="5" class="empty-state">No keys found.</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 
   <div class="sidebar">
@@ -258,10 +330,25 @@ function showToast(msg, type='success') {
   setTimeout(() => { t.style.display = 'none'; }, 3000);
 }
 
+function saveKey() {
+  const k = document.getElementById('nexusKeyInput').value;
+  if (!k) { alert('Please enter an API Key'); return; }
+  localStorage.setItem('nexus_api_key', k);
+  showToast('API Key saved', 'success');
+  loadVoices();
+}
+
 // ── API ──────────────────────────────────────────────────────────────────────
 async function api(method, path, body) {
   try {
-    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    const key = localStorage.getItem('nexus_api_key');
+    const opts = { 
+        method, 
+        headers: { 
+            'Content-Type': 'application/json',
+            'X-API-Key': key || ''
+        } 
+    };
     if (body) opts.body = JSON.stringify(body);
     const r = await fetch(path, opts);
     if (r.status === 401) { showToast(T.err_unauthorized, 'error'); return null; }
@@ -444,6 +531,113 @@ function updateStatus(ok) {
   document.getElementById('infoApi').textContent = ok ? 'OK' : T.error;
 }
 
+// ── Navigation ──────────────────────────────────────────────────────────────
+function switchTab(t) {
+  const tabs = ['voices', 'users', 'keys'];
+  tabs.forEach(tab => {
+    const elTab = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    const elView = document.getElementById('view' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    const elBar = document.getElementById('toolbar' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    if (tab === t) {
+      elTab.classList.add('active');
+      elView.style.display = 'block';
+      if (elBar) elBar.style.display = 'flex';
+    } else {
+      elTab.classList.remove('active');
+      elView.style.display = 'none';
+      if (elBar) elBar.style.display = 'none';
+    }
+  });
+  if (t === 'users') loadUsers();
+  if (t === 'keys') loadKeys();
+}
+
+async function loadUsers() {
+  const tbody = document.getElementById('userBody');
+  tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Loading users from Firebase...</td></tr>`;
+  const res = await api('GET', '/admin/users');
+  if (!res || !res.data?.users) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Failed to fetch users.</td></tr>`;
+    return;
+  }
+  const users = res.data.users;
+  if (!users.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No users found in Firestore 'users' collection.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = users.map(u => {
+    const email = escapeHtml(u.email || u.uid || '—');
+    const slots = `${u.slotUsed || 0} / ${u.slotLimit || 1}`;
+    const vCount = u.voices ? u.voices.length : 0;
+    const updated = u.updatedAt ? new Date(u.updatedAt).toLocaleString() : '—';
+    return `<tr>
+      <td>${email}</td>
+      <td>${slots}</td>
+      <td>${vCount}</td>
+      <td>${updated}</td>
+      <td>
+        <button class="action-btn" onclick="showUserDetail('${u.uid}')">Details</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function loadKeys() {
+  const tbody = document.getElementById('keysBody');
+  tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Loading API keys...</td></tr>`;
+  const res = await api('GET', '/admin/keys');
+  if (!res || !res.data?.keys) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">Failed to fetch keys.</td></tr>`;
+    return;
+  }
+  const keys = res.data.keys;
+  if (!keys.length) {
+    tbody.innerHTML = `<tr><td colspan="5" class="empty-state">No API keys found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = keys.map(k => {
+    const name = escapeHtml(k.name || '—');
+    const masked = k.key_preview || '—';
+    const status = k.active ? '<span class="status-badge active">Active</span>' : '<span class="status-badge inactive">Revoked</span>';
+    const created = new Date(k.created).toLocaleString();
+    return `<tr>
+      <td>${name}</td>
+      <td style="font-family:monospace">${masked}</td>
+      <td>${status}</td>
+      <td>${created}</td>
+      <td>
+        ${k.active ? `<button class="action-btn delete" onclick="revokeKey('${k.id}')">Revoke</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function revokeKey(id) {
+  if (!confirm('Are you sure you want to revoke this API key?')) return;
+  const res = await api('DELETE', `/admin/keys/${id}`);
+  if (res) { showToast('Key revoked successfully'); loadKeys(); }
+}
+
+function showAddKeyModal() {
+  const name = prompt('Enter a name for the new API key:');
+  if (!name) return;
+  addKey(name);
+}
+
+async function addKey(name) {
+  const res = await api('POST', '/admin/keys', { name });
+  if (res && res.data?.key) {
+    alert(`New API Key created: ${res.data.key}\n\nIMPORTANT: Copy this key now! It will not be shown again.`);
+    loadKeys();
+  }
+}
+
+function showUserDetail(uid) {
+  // Option: Show a modal with the user's full Firestore document JSON
+  // For now just show a message.
+  showToast('User detail visualization coming soon...', 'info');
+}
+
 // ── Utils ─────────────────────────────────────────────────────────────────────
 function escapeHtml(s) {
   if (!s) return '';
@@ -452,6 +646,7 @@ function escapeHtml(s) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.getElementById('langSelect').value = localStorage.getItem('voice_manager_locale') || 'en';
+document.getElementById('nexusKeyInput').value = localStorage.getItem('nexus_api_key') || '';
 setLocale(document.getElementById('langSelect').value);
 document.getElementById('langSelect').addEventListener('change', e => setLocale(e.target.value));
 checkHealth();

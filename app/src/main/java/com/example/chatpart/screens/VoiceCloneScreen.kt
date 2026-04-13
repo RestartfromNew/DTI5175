@@ -427,6 +427,7 @@ fun VoiceCloneScreen(
                                                 Log.d("VoiceDebug", "recorded file = ${file.absolutePath}")
                                                 val transcript = deepgramClient.transcribe(file)
                                                 Log.d("VoiceDebug", "referenceTranscript = $transcript")
+                                                Log.d("TRANSCRIPTION_TAG", "Captured Transcription: $transcript")
                                                 referenceTranscript = transcript
                                                 isTranscribing = false
                                             }
@@ -640,6 +641,7 @@ fun VoiceCloneScreen(
 
                                     // 3. Upload reference assets (Audio + Transcript) for future use
                                     try {
+                                        Log.d("TRANSCRIPTION_TAG", "Sending to server for characterId=$characterId: $referenceTranscript")
                                         val uploadResult = voiceCloneManager.uploadReferenceAssets(
                                             audioFile = file,
                                             characterId = characterId,

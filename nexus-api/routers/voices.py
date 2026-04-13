@@ -31,7 +31,7 @@ def err(code: str, message: str):
 
 
 @router.get("", response_model=ApiResponse)
-async def list_voices(locale: str = Query("en")):
+async def list_voices(locale: str = Query("en"), _auth: str = Depends(verify_api_key)):
     voices, error = await minimax.get_voices()
     if error:
         op_logger.log("list_voices", "minimax", "failed", error, locale)
@@ -46,7 +46,7 @@ async def list_voices(locale: str = Query("en")):
 
 
 @router.get("/{voice_id}", response_model=ApiResponse)
-async def get_voice(voice_id: str, locale: str = Query("en")):
+async def get_voice(voice_id: str, locale: str = Query("en"), _auth: str = Depends(verify_api_key)):
     voices, error = await minimax.get_voices()
     if error:
         raise HTTPException(status_code=502, detail=err("MINIMAX_ERROR", error))
@@ -57,7 +57,7 @@ async def get_voice(voice_id: str, locale: str = Query("en")):
 
 
 @router.post("/{voice_id}/activate", response_model=ApiResponse)
-async def activate_voice(voice_id: str, locale: str = Query("en")):
+async def activate_voice(voice_id: str, locale: str = Query("en"), _auth: str = Depends(verify_api_key)):
     success, error = await minimax.activate_voice(voice_id)
     if not success:
         op_logger.log("activate", voice_id, "failed", error, locale)
@@ -67,7 +67,7 @@ async def activate_voice(voice_id: str, locale: str = Query("en")):
 
 
 @router.delete("/{voice_id}", response_model=ApiResponse)
-async def delete_voice(voice_id: str, locale: str = Query("en")):
+async def delete_voice(voice_id: str, locale: str = Query("en"), _auth: str = Depends(verify_api_key)):
     success, error = await minimax.delete_voice(voice_id)
     if not success:
         op_logger.log("delete", voice_id, "failed", error, locale)
@@ -82,7 +82,7 @@ class BatchDeleteRequest(BaseModel):
 
 
 @router.post("/batch-delete", response_model=ApiResponse)
-async def batch_delete_voices(body: BatchDeleteRequest, locale: str = Query("en")):
+async def batch_delete_voices(body: BatchDeleteRequest, locale: str = Query("en"), _auth: str = Depends(verify_api_key)):
     if not body.confirm:
         raise HTTPException(status_code=400, detail=err("CONFIRM_REQUIRED", "Set confirm=true to proceed"))
     results = {"deleted": [], "failed": []}
