@@ -5,11 +5,11 @@ flowchart TD
     B -->|Yes| OB1[Onboarding Page 1]
     B -->|No| C{Already Signed In?}
 
-    OB1 -->|Next| OB2[Onboarding Page 2\nCloud Features]
+    OB1 -->|Next| OB2[Onboarding Page 2<br/>Cloud Features]
     OB1 -->|Skip| C
 
-    OB2 -->|Next / Skip\nSigned In| LANG
-    OB2 -->|Next / Skip\nNot Signed In| LOGIN
+    OB2 -->|Next / Skip<br/>Signed In| LANG
+    OB2 -->|Next / Skip<br/>Not Signed In| LOGIN
 
     C -->|Yes| MAIN
     C -->|No| LOGIN
@@ -20,8 +20,8 @@ flowchart TD
         LANG[🌐 Language Selection]
         GENDER[⚧ Gender Selection]
         AVATAR[🖼️ Avatar Selection]
-        BASIC[📝 Basic Info\nName & Relationship]
-        DETAIL[📋 Detail Info\nPersonality & Background]
+        BASIC[📝 Basic Info<br/>Name & Relationship]
+        DETAIL[📋 Detail Info<br/>Personality & Background]
         VOICE[🎤 Voice Clone]
 
         LANG -->|Select / Skip| GENDER
@@ -36,10 +36,10 @@ flowchart TD
         VOICE -->|Back| DETAIL
     end
 
-    GENDER -->|Skip\nHas Characters| MAIN
-    GENDER -->|Skip\nNo Characters| CHAR_LIST
-    AVATAR -->|Skip\nHas Characters| MAIN
-    AVATAR -->|Skip\nNo Characters| CHAR_LIST
+    GENDER -->|Skip<br/>Has Characters| MAIN
+    GENDER -->|Skip<br/>No Characters| CHAR_LIST
+    AVATAR -->|Skip<br/>Has Characters| MAIN
+    AVATAR -->|Skip<br/>No Characters| CHAR_LIST
     BASIC -->|Skip| CHAR_LIST
 
     subgraph MAIN [🏠 Main App]
@@ -55,23 +55,24 @@ flowchart TD
 
     subgraph CHAR_MGMT [👥 Character Management]
         CHAR_LIST[Character List]
-        CHAR_EDITOR[Character Editor\nCreate / Edit]
+        CHAR_EDITOR[Character Editor<br/>Create / Edit]
 
         CHAR_LIST -->|Create New| CHAR_EDITOR
         CHAR_LIST -->|Edit| CHAR_EDITOR
         CHAR_EDITOR -->|Save| CHAR_LIST
-        CHAR_EDITOR -->|Cancel\nHas Chars| CHAR_LIST
-        CHAR_EDITOR -->|Cancel\nNo Chars| OB2
+        CHAR_EDITOR -->|Cancel<br/>Has Chars| CHAR_LIST
+        CHAR_EDITOR -->|Cancel<br/>No Chars| OB2
     end
 
     CHAR_LIST -->|Select Character| MAIN
     CHAR_LIST -->|Back| MAIN
 
+    LIVE_VOICE[🔮 Live Voice Mode<br/>Push-to-Talk]
+
     subgraph CHAT_FLOW [💬 Chat Flow]
         direction TB
         TEXT_CHAT[💬 Text Chat Mode]
-        VOICE_CHAT[🎤 Voice Chat Mode\nWeChat-style]
-        LIVE_VOICE[🔮 Live Voice Mode\nPush-to-Talk]
+        VOICE_CHAT[🎤 Voice Chat Mode<br/>WeChat-style]
 
         TEXT_CHAT --> TEXT_INPUT[📝 User types text]
         TEXT_INPUT --> STT_PASS[(User text used directly)]
@@ -80,23 +81,23 @@ flowchart TD
         VOICE_CHAT --> HOLD_MIC[🔘 Hold-to-Record]
         HOLD_MIC --> RECORD_AUDIO[🎙️ AudioRecord records PCM]
         RECORD_AUDIO --> STOP_RECORD[🔓 Release to stop]
-        STOP_RECORD --> DEEPGRAM_STT[🌐 Deepgram ASR\nSTT: WAV → text]
+        STOP_RECORD --> DEEPGRAM_STT[🌐 Deepgram ASR<br/>STT: WAV → text]
         DEEPGRAM_STT --> PERSONCHAT
 
         LIVE_VOICE --> PUSH_MIC[🔘 Push-to-Talk]
-        PUSH_MIC --> LIVE_RECORD[🎙️ AudioRecord records PCM\nwith RMS waveform]
-        LIVE_RECORD --> LIVE_STT[🌐 Deepgram ASR\nTranscribe WAV]
+        PUSH_MIC --> LIVE_RECORD[🎙️ AudioRecord records PCM<br/>with RMS waveform]
+        LIVE_RECORD --> LIVE_STT[🌐 Deepgram ASR<br/>Transcribe WAV]
         LIVE_STT --> PERSONCHAT
 
-        PERSONCHAT --> EMBED_QUERY[🔢 EmbeddingLlm\nText → FloatArray[768]]
-        EMBED_QUERY --> VECTOR_SEARCH[🔍 LocalVectorMemory\nCosine Similarity Search\ntopK=5 memories]
-        VECTOR_SEARCH --> BUILD_PROMPT[📋 Prompt.buildPrompt\nProfile + Memory + History]
-        BUILD_PROMPT --> LLM_REPLY[🤖 MiniMaxLlmClient\nMiniMax-M2.1 API]
-        LLM_REPLY --> EXTRACT_MEM[💾 Extract [MEM:...] tags\nSave to vector memory]
-        EXTRACT_MEM --> RETURN_RESULT[✅ Result{replyText, emotion}]
+        PERSONCHAT --> EMBED_QUERY[🔢 EmbeddingLlm<br/>Text → FloatArray-768]
+        EMBED_QUERY --> VECTOR_SEARCH[🔍 LocalVectorMemory<br/>Cosine Similarity Search<br/>topK=5 memories]
+        VECTOR_SEARCH --> BUILD_PROMPT[📋 Prompt.buildPrompt<br/>Profile + Memory + History]
+        BUILD_PROMPT --> LLM_REPLY[🤖 MiniMaxLlmClient<br/>MiniMax-M2.1 API]
+        LLM_REPLY --> EXTRACT_MEM[💾 Extract MEM tags<br/>Save to vector memory]
+        EXTRACT_MEM --> RETURN_RESULT[✅ Result<br/>replyText, emotion]
 
-        RETURN_RESULT --> TTS_TEXT[🔈 TTS optional\nMiniMax TTS\ntext → .mp3]
-        TTS_TEXT --> VOICE_OUTPUT[🔊 Playback\nvia MediaPlayer]
+        RETURN_RESULT --> TTS_TEXT[🔈 TTS optional<br/>MiniMax TTS<br/>text → .mp3]
+        TTS_TEXT --> VOICE_OUTPUT[🔊 Playback<br/>via MediaPlayer]
     end
 
     CHAT -->|Switch Mode| TEXT_CHAT
@@ -110,7 +111,7 @@ flowchart TD
 flowchart LR
     subgraph INPUT
         USER_TEXT[User Text Input]
-        USER_VOICE[User Voice\nWAV File]
+        USER_VOICE[User Voice<br/>WAV File]
     end
 
     subgraph STT_LAYER [🎤 Speech-to-Text]
@@ -119,15 +120,15 @@ flowchart LR
     end
 
     subgraph CORE_BRAIN [🧠 PersonChat]
-        EMBED[EmbeddingLlm\ntext-embedding-004]
-        MEMORY[LocalVectorMemory\nInMemoryStore]
+        EMBED[EmbeddingLlm<br/>text-embedding-004]
+        MEMORY[LocalVectorMemory<br/>InMemoryStore]
         PROMPT[Prompt.buildPrompt]
-        LLM[MiniMaxLlmClient\nMiniMax-M2.1]
+        LLM[MiniMaxLlmClient<br/>MiniMax-M2.1]
     end
 
     subgraph TTS_LAYER [🔈 Text-to-Speech]
-        MINIMAX_TTS[MiniMaxAudioClient\nMiniMax TTS API]
-        VOICE_CLONE[VoiceClone\nCustom voice_id]
+        MINIMAX_TTS[MiniMaxAudioClient<br/>MiniMax TTS API]
+        VOICE_CLONE[VoiceClone<br/>Custom voice_id]
     end
 
     USER_TEXT --> PROMPT
